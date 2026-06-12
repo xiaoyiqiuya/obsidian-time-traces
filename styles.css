@@ -1,0 +1,574 @@
+/* 时光似金 — Obsidian 插件样式 */
+
+/* ========== 容器 ========== */
+.time-is-gold-container {
+  padding: 12px 16px;
+  font-size: 14px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ========== 底部 Tab 栏 ========== */
+.tig-tabbed-view {
+  padding: 0 !important;
+}
+.tig-tab-content {
+  padding: 12px 16px;
+  padding-bottom: 8px;
+  min-height: 100px;
+}
+.tig-tabbar {
+  display: flex;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  padding: 2px 4px;
+  gap: 4px;
+  position: sticky;
+  bottom: 0;
+  margin-bottom: 26px;
+}
+.tig-tabbar-btn {
+  flex: 1;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0px;
+  -webkit-tap-highlight-color: transparent;
+}
+.tig-tabbar-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.tig-tabbar-btn.active {
+  background: var(--text-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+/* ========== 分区 ========== */
+.tig-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tig-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+.tig-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  color: var(--text-normal);
+}
+
+/* ========== 脚步计时器 ========== */
+.tig-timer-section {
+  background: var(--background-primary-alt);
+  border-radius: 8px;
+  padding: 14px 16px;
+  text-align: center;
+}
+.tig-timer-display {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-accent);
+  margin: 8px 0;
+  font-family: var(--font-monospace);
+}
+
+/* ========== 项目按钮列表 ========== */
+.tig-project-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tig-project-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid var(--text-accent);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tig-project-btn:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--text-accent);
+  transform: translateY(-1px);
+}
+.tig-project-btn:active {
+  transform: translateY(0);
+}
+
+/* ========== 新建项目输入 ========== */
+.tig-new-project {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tig-input {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.tig-input:focus {
+  border-color: var(--text-accent);
+  outline: none;
+}
+.tig-add-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 4px;
+  background: var(--text-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+}
+.tig-add-btn:hover {
+  opacity: 0.85;
+}
+
+/* ========== 空状态 ========== */
+.tig-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+/* ========== 时间条目 ========== */
+.tig-entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tig-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--background-primary);
+  transition: background 0.15s;
+  cursor: default;
+}
+.tig-entry-row:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-entry-time {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 44px;
+}
+.tig-entry-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tig-entry-duration {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 60px;
+  text-align: right;
+}
+
+/* ========== 项目树视图 ========== */
+.tig-tree-container {
+  padding: 12px 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+.tig-tree-container h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+}
+.tig-tree-node {
+  user-select: none;
+}
+.tig-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.tig-tree-row:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-tree-row.selected {
+  background: var(--text-accent);
+  color: var(--text-on-accent);
+}
+.tig-tree-toggle {
+  width: 18px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.tig-tree-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tig-tree-name {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tig-tree-duration {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 50px;
+  text-align: right;
+}
+.tig-tree-goal {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 40px;
+  text-align: right;
+}
+.tig-tree-children {
+  margin-left: 16px;
+}
+.tig-tree-add {
+  margin-left: 24px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  display: inline-block;
+  margin-top: 2px;
+}
+.tig-tree-add:hover {
+  color: var(--text-accent);
+  border-color: var(--text-accent);
+}
+
+/* ========== 进度条 ========== */
+.tig-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.tig-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ========== 快速记录模态框 ========== */
+.tig-modal {
+  padding: 20px;
+  min-width: 320px;
+}
+.tig-modal h2 {
+  font-size: 18px;
+  margin: 0 0 16px 0;
+}
+.tig-modal-timer {
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+  margin: 12px 0;
+  color: var(--text-accent);
+  font-family: var(--font-monospace);
+}
+.tig-modal-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.tig-modal-project-btn {
+  padding: 10px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid var(--text-accent);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+  transition: all 0.15s;
+}
+.tig-modal-project-btn:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--text-accent);
+}
+
+/* ========== 设置页 ========== */
+.tig-setting-section {
+  margin-bottom: 20px;
+}
+.tig-setting-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tig-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.tig-color-row label {
+  min-width: 50px;
+  font-size: 13px;
+}
+.tig-color-input {
+  width: 50px;
+  height: 28px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+/* ========== 右键菜单提示 ========== */
+.tig-context-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* ========== 响应式/暗色主题适配 ========== */
+.theme-dark .tig-timer-section {
+  background: var(--background-secondary);
+}
+.theme-dark .tig-entry-row {
+  background: var(--background-secondary);
+}
+
+/* ========== 触屏操作按钮（桌面+iPad 通用）========== */
+.tig-tree-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.tig-tree-row:hover .tig-tree-actions {
+  opacity: 1;
+}
+.tig-action-btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tig-action-btn:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-action-btn:active {
+  background: var(--background-modifier-border);
+}
+
+/* ========== 进度条文字 ========== */
+.tig-tree-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 2px 28px;
+  font-size: 11px;
+}
+.tig-progress-text {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 32px;
+}
+
+/* ========== 统计视图 ========== */
+.tig-stats-view {
+  padding: 12px 16px;
+  height: 100%;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+/* 统计 Tab 栏 */
+.tig-stats-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tig-stats-tab {
+  padding: 6px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 16px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tig-stats-tab:hover {
+  color: var(--text-normal);
+  border-color: var(--text-accent);
+}
+.tig-stats-tab.active {
+  background: var(--text-accent);
+  color: var(--text-on-accent);
+  border-color: var(--text-accent);
+}
+
+/* 统计标题 */
+.tig-stats-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: var(--text-normal);
+}
+
+/* 统计汇总 */
+.tig-stats-summary {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-accent);
+  margin: 8px 0 16px;
+  padding: 8px;
+  background: var(--background-primary-alt);
+  border-radius: 8px;
+}
+
+/* 统计表格 */
+.tig-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.tig-stats-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.tig-stats-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+  color: var(--text-normal);
+}
+
+/* 环形图列表 */
+.tig-donut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.tig-donut-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--background-primary);
+  transition: background 0.12s;
+  cursor: default;
+}
+.tig-donut-item:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-donut-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tig-donut-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tig-donut-val {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ========== 触屏设备优化 ========== */
+@media (hover: none) and (pointer: coarse) {
+  /* iPad / 触屏：操作按钮始终可见 */
+  .tig-tree-actions {
+    opacity: 0.85;
+  }
+  .tig-action-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 18px;
+  }
+  .tig-tree-row {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}
