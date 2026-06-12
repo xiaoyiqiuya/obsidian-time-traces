@@ -15,12 +15,13 @@ function isMobile(plugin) {
 }
 
 // 跨 Vault 共享数据路径
-// "shared" → ~/.time-is-gold/data.json（仅桌面端 Node.js fs）
-// "vault"  → Vault 内 .time-is-gold/data.json（全平台，用 Obsidian adapter API）
+// "shared" → ~/.time-is-gold/data.json（仅桌面端，Node.js fs）
+// "vault"  → Vault 内 {dataFolder}/time-is-gold.json（全平台，Obsidian adapter API）
 function getDataPath(plugin) {
   const loc = plugin.settings?.dataLocation || 'shared';
   if (loc === 'vault' || isMobile(plugin)) {
-    return { mode: 'vault', path: '.time-is-gold/data.json' };
+    const folder = plugin.settings?.dataFolder || '时迹数据';
+    return { mode: 'vault', path: `${folder}/time-is-gold.json` };
   }
   return { mode: 'shared', path: '.time-is-gold/data.json' };
 }
@@ -48,7 +49,8 @@ const DEFAULT_SETTINGS = {
   defaultSituation: "默认",
   showRibbonIcon: true,
   appendToDailyNote: false,
-  dataLocation: "shared"  // "shared" = ~/.time-is-gold/  |  "vault" = Vault内同步
+  dataLocation: "shared",  // "shared" = ~/.time-is-gold/  |  "vault" = Vault内同步
+  dataFolder: "时迹数据"    // vault 模式下数据文件的存放文件夹
 };
 
 function uid() {
@@ -1755,21 +1757,36 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('数据存储位置')
-      .setDesc('选择数据文件的存放位置。「Vault 内」可被 remotely-save 等同步插件跨设备同步。')
+      .setDesc('「Vault 内」可被 remotely-save 跨设备同步；「系统目录」仅桌面端本地。')
       .addDropdown(dropdown => dropdown
         .addOption('shared', '系统目录 (~/.time-is-gold/)')
-        .addOption('vault', 'Vault 内 (.time-is-gold/)')
+        .addOption('vault', 'Vault 内')
         .setValue(this.plugin.settings.dataLocation || 'shared')
         .onChange(async (value) => {
           const old = this.plugin.settings.dataLocation;
           this.plugin.settings.dataLocation = value;
           await this.plugin.saveSettings();
-
           if (old !== value) {
-            // 切换时迁移数据
             await this.plugin.loadSharedData();
             this.plugin.refreshAllViews();
             new Notice(`✅ 数据已切换到: ${value === 'vault' ? 'Vault 内同步' : '系统目录'}`);
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Vault 内文件夹')
+      .setDesc('数据文件 time-is-gold.json 的存放目录。如设为「考研/自律」，则存在 考研/自律/time-is-gold.json。仅 Vault 内模式生效。')
+      .addText(text => text
+        .setPlaceholder('时迹数据')
+        .setValue(this.plugin.settings.dataFolder || '时迹数据')
+        .onChange(async (value) => {
+          const folder = value.trim() || '时迹数据';
+          const old = this.plugin.settings.dataFolder;
+          this.plugin.settings.dataFolder = folder;
+          await this.plugin.saveSettings();
+          if (old !== folder && this.plugin.settings.dataLocation === 'vault') {
+            await this.plugin.loadSharedData();
+            this.plugin.refreshAllViews();
           }
         }));
 
@@ -1965,9 +1982,9 @@ class TimeIsGoldPlugin extends Plugin {
     const { mode, path: relPath } = getDataPath(this);
     if (mode === 'vault') {
       const adapter = this._getAdapter();
-      const dir = '.time-is-gold';
-      if (!(await adapter.exists(dir))) {
-        await adapter.mkdir(dir);
+      const folder = this.settings?.dataFolder || '时迹数据';
+      if (!(await adapter.exists(folder))) {
+        await adapter.mkdir(folder);
       }
     } else {
       // Desktop shared mode — lazy require fs
@@ -2036,6 +2053,24 @@ class TimeIsGoldPlugin extends Plugin {
           return;
         }
       } catch(e) { /* fs not available, skip */ }
+    }
+
+    // ── 迁移：从旧 vault 路径 .time-is-gold/data.json 迁移 ──
+    if (mode === 'vault' && relPath !== '.time-is-gold/data.json') {
+      try {
+        if (await adapter.exists('.time-is-gold/data.json')) {
+          const oldRaw = await adapter.read('.time-is-gold/data.json');
+          const parsed = JSON.parse(oldRaw);
+          this.data = {
+            projects: parsed.projects || [],
+            entries: parsed.entries || [],
+            lastRecordTime: parsed.lastRecordTime || null
+          };
+          await adapter.write(relPath, JSON.stringify(this.data, null, 2));
+          console.log('🐾 时迹: 数据已从旧路径迁移到新文件夹');
+          return;
+        }
+      } catch(e) { /* skip */ }
     }
 
     // ── 迁移：从 Vault 本地 data.json（旧格式）──
