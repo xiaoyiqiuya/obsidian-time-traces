@@ -650,3 +650,9 @@
   background: var(--text-accent); color: var(--text-on-accent);
   cursor: pointer; font-size: 13px; font-weight: 600;
 }
+.tig-split-disabled {
+  opacity: 0.4; pointer-events: none; cursor: not-allowed;
+}
+.tig-split-over {
+  color: var(--text-error) !important;
+}

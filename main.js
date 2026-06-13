@@ -539,7 +539,6 @@ class SplitRecordModal extends Modal {
 
   get totalGap() { return this.gapInfo.gapMinutes; }
   get allocatedMin() { return this.items.reduce((s, i) => s + i.duration, 0); }
-  get remainingMin() { return Math.max(0, this.totalGap - this.allocatedMin); }
 
   onOpen() {
     const { contentEl } = this;
@@ -567,18 +566,45 @@ class SplitRecordModal extends Modal {
       }
     }
 
-    // 添加按钮
+    // 添加按钮（树形菜单 + 新建）
     const addRow = contentEl.createDiv('tig-split-add-row');
     const addBtn = addRow.createEl('button', { text: '＋ 补其他活动', cls: 'tig-split-add-btn' });
     addBtn.addEventListener('click', () => {
       const menu = new Menu();
-      const projects = dm.getProjects();
-      for (const p of projects) {
-        menu.addItem(item => item.setTitle(p.name).onClick(() => {
-          this._addItemRow(this.recsEl || contentEl, p.id, p.name, p.color || '#9E9E9E', 60);
-          this._refreshSummary();
+
+      // 新建项目
+      menu.addItem(item => item
+        .setTitle('＋ 新建项目')
+        .setIcon('plus')
+        .onClick(() => {
+          new ProjectEditModal(this.app, this.plugin, null, (newProject) => {
+            if (newProject) {
+              this._addItemRow(this.recsEl || contentEl, newProject.id, newProject.name, newProject.color || '#9E9E9E', 60);
+              this._refreshSummary();
+            }
+          }).open();
         }));
-      }
+
+      menu.addSeparator();
+
+      // 树形项目列表
+      const tree = dm.getProjectTree(null);
+      const buildMenu = (nodes, m, depth) => {
+        for (const node of nodes) {
+          const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+          m.addItem(item => item
+            .setTitle(prefix + node.name)
+            .onClick(() => {
+              this._addItemRow(this.recsEl || contentEl, node.id, node.name, node.color || '#9E9E9E', 60);
+              this._refreshSummary();
+            }));
+          if (node.children && node.children.length > 0) {
+            buildMenu(node.children, m, depth + 1);
+          }
+        }
+      };
+      buildMenu(tree, menu, 0);
+
       menu.showAtPosition({ x: addBtn.getBoundingClientRect().left, y: addBtn.getBoundingClientRect().bottom });
     });
 
@@ -599,18 +625,17 @@ class SplitRecordModal extends Modal {
       new Notice(`🐾 ${mainProject?.name} — ${fmtDuration(this.totalGap)}`);
     });
 
-    const confirmBtn = btnRow.createEl('button', {
+    this.confirmBtn = btnRow.createEl('button', {
       text: '✓ 确认分账',
       cls: 'tig-split-confirm'
     });
-    confirmBtn.addEventListener('click', async () => {
+    this.confirmBtn.addEventListener('click', async () => {
+      if (this.allocatedMin > this.totalGap) return; // 超限禁用
       const remaining = this.remainingMin;
       const entries = [...this.items];
-      // 主项目 = 剩余
       if (remaining > 0) {
         entries.push({ projectId: this.mainProjectId, duration: remaining, note: '' });
       }
-      // 未分配的就记「未记录」
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
       }
@@ -631,7 +656,7 @@ class SplitRecordModal extends Modal {
     const existing = this.items.find(i => i.projectId === projectId);
     if (existing) { existing.duration += duration; this._refreshAll(); return; }
 
-    const item = { projectId, name, color, duration: Math.min(duration, this.remainingMin) };
+    const item = { projectId, name, color, duration: Math.min(duration, this.totalGap) };
     this.items.push(item);
 
     const row = parentEl.createDiv('tig-split-item');
@@ -674,19 +699,33 @@ class SplitRecordModal extends Modal {
     if (!this.summaryEl) return;
     this.summaryEl.empty();
     const allocated = this.allocatedMin;
-    const remaining = this.remainingMin;
+    const remaining = this.totalGap - allocated;
+    const over = allocated > this.totalGap;
     const mainProject = this.plugin.dataManager.getProject(this.mainProjectId);
 
     this.summaryEl.createSpan({
-      text: `已分配 ${fmtDuration(allocated)} ｜ 剩余 ${fmtDuration(remaining)}`,
-      cls: 'tig-split-stats'
+      text: over
+        ? `⚠️ 已分配 ${fmtDuration(allocated)} ｜ 超出 ${fmtDuration(-remaining)}`
+        : `已分配 ${fmtDuration(allocated)} ｜ 剩余 ${fmtDuration(remaining)}`,
+      cls: 'tig-split-stats' + (over ? ' tig-split-over' : '')
     });
 
-    if (remaining > 0) {
+    if (!over && remaining > 0) {
       this.summaryEl.createDiv({
         text: `📌「${mainProject?.name || '项目'}」${fmtDuration(remaining)}（剩余自动归此）`,
         cls: 'tig-split-main-hint'
       });
+    }
+
+    // 超限时禁用确认按钮
+    if (this.confirmBtn) {
+      if (over) {
+        this.confirmBtn.disabled = true;
+        this.confirmBtn.addClass('tig-split-disabled');
+      } else {
+        this.confirmBtn.disabled = false;
+        this.confirmBtn.removeClass('tig-split-disabled');
+      }
     }
   }
 
