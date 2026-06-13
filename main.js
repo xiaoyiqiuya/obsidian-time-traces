@@ -16,12 +16,12 @@ function isMobile(plugin) {
 
 // 跨 Vault 共享数据路径
 // "shared" → ~/.time-is-gold/data.json（仅桌面端，Node.js fs）
-// "vault"  → Vault 内 {dataFolder}/time-is-gold.json（全平台，Obsidian adapter API）
+// "vault"  → Vault 内 {dataFolder}/time-traces.json（全平台，Obsidian adapter API）
 function getDataPath(plugin) {
   const loc = plugin.settings?.dataLocation || 'shared';
   if (loc === 'vault' || isMobile(plugin)) {
     const folder = plugin.settings?.dataFolder || '时迹数据';
-    return { mode: 'vault', path: `${folder}/time-is-gold.json` };
+    return { mode: 'vault', path: `${folder}/time-traces.json` };
   }
   return { mode: 'shared', path: '.time-is-gold/data.json' };
 }
@@ -2068,6 +2068,17 @@ class TimeIsGoldPlugin extends Plugin {
     await this._ensureDataDir();
     const { mode, path: relPath } = getDataPath(this);
     const adapter = this._getAdapter();
+
+    // ── 迁移旧文件名：time-is-gold.json → time-traces.json ──
+    if (mode === 'vault' && !(await adapter.exists(relPath))) {
+      const folder = this.settings?.dataFolder || '时迹数据';
+      const oldPath = `${folder}/time-is-gold.json`;
+      if (await adapter.exists(oldPath)) {
+        const oldRaw = await adapter.read(oldPath);
+        await adapter.write(relPath, oldRaw);
+        console.log('🐾 时迹: 数据已从 time-is-gold.json 迁移到 time-traces.json');
+      }
+    }
 
     // ── 尝试从目标路径加载 ──
     let raw = null;
