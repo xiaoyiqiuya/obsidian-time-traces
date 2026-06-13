@@ -1,7 +1,7 @@
 {
   "id": "time-is-gold",
   "name": "时迹",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minAppVersion": "0.15.0",
   "description": "脚步计时法 · 柳比歇夫时间管理。事后记录、项目树、周月统计、全平台本地存储。",
   "author": "砂糖",
