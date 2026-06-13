@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   defaultSituation: "默认",
   showRibbonIcon: true,
   appendToDailyNote: false,
-  dataLocation: "shared",  // "shared" = ~/.time-is-gold/  |  "vault" = Vault内同步
+  dataLocation: "vault",  // "shared" = ~/.time-is-gold/  |  "vault" = Vault内同步
   dataFolder: "时迹数据"    // vault 模式下数据文件的存放文件夹
 };
 
@@ -162,8 +162,16 @@ class DataManager {
     return Math.min(100, Math.round((totalMin / goalMin) * 100));
   }
 
+  hasProjectNamed(name, parentId = null) {
+    return (this.data.projects || []).some(p => 
+      p.name === name && p.parentId === parentId && !p.archived
+    );
+  }
+
   async addProject(name, parentId = null, color = null, situation = null) {
     const projects = this.data.projects || [];
+    // 同名警告（仍允许创建，调用方负责提示）
+    const isDuplicate = this.hasProjectNamed(name, parentId);
     const project = {
       id: uid(),
       name,
@@ -477,10 +485,13 @@ class ProjectEditModal extends Modal {
           note: noteInput.value.trim()
         });
       } else {
+        if (this.plugin.dataManager.hasProjectNamed(name)) {
+          new Notice(`⚠️ 已存在同名项目「${name}」`);
+        }
         await this.plugin.dataManager.addProject(name, null, color, situation);
       }
       
-      new Notice(this.project ? '项目已更新' : '项目已创建');
+      new Notice(this.project ? '项目已更新' : `✅ 项目「${name}」已创建`);
       if (this.onSaved) this.onSaved();
       this.close();
     });
@@ -652,17 +663,14 @@ class TimeIsGoldMainView extends ItemView {
       new ProjectEditModal(this.app, this.plugin, node, () => this.renderTreePanel()).open();
     });
 
-    row.addEventListener('click', async (e) => {
+    // 点击：仅切换展开/折叠，不记录（通过按钮操作）
+    row.addEventListener('click', (e) => {
       if (e.target.closest('.tig-action-btn') || e.target.closest('.tig-tree-actions')) return;
       if (e.target === toggle || e.target.closest('.tig-tree-toggle')) {
         if (hasChildren) {
           if (isExpanded) this.expandedNodes.delete(node.id); else this.expandedNodes.add(node.id);
           this.renderTreePanel();
         }
-      } else {
-        const entry = await dm.recordEntry(node.id);
-        new Notice(`🐾 ${node.name} — ${fmtDuration(entry.duration)}`);
-        this.renderTreePanel();
       }
     });
 
@@ -773,17 +781,37 @@ class TimeIsGoldMainView extends ItemView {
       txt.setAttribute('fill', cMuted); txt.textContent = `${Math.round(h / 60)}h`;
       svg.appendChild(txt);
     }
+    // 堆叠柱：每天按情境分色
+    const stColors = this.plugin.settings.situationColors || SITUATION_COLORS;
     for (let i = 0; i < 7; i++) {
-      const h = maxMin > 0 ? (dailyTotals[i] / maxMin) * barArea : 0;
-      const x = padL + i * (barW + 6) + 3, y = padT + barArea - h;
+      const dayEntries = (this.plugin.data.entries || []).filter(x => fmtDate(x.endTime) === days[i]);
+      // 按情境分组
+      const sitMin = {};
+      for (const e of dayEntries) {
+        const p = dm.getProject(e.projectId);
+        const sit = p?.situation || '默认';
+        sitMin[sit] = (sitMin[sit] || 0) + (e.duration || 0);
+      }
+      const totalDay = Object.values(sitMin).reduce((a,b)=>a+b,0);
+      const sortedSits = Object.entries(sitMin).sort((a,b)=>b[1]-a[1]);
+      const x = padL + i * (barW + 6) + 3;
       const isToday = days[i] === today();
-      const rect = document.createElementNS(NS, 'rect');
-      rect.setAttribute('x', String(x)); rect.setAttribute('y', y.toFixed(1));
-      rect.setAttribute('width', String(barW)); rect.setAttribute('height', Math.max(h, 1).toFixed(1));
-      rect.setAttribute('rx', '2');
-      rect.setAttribute('fill', isToday ? cAccent : cBar);
-      rect.setAttribute('opacity', isToday ? '1' : '0.65');
-      svg.appendChild(rect);
+
+      // 从底部向上堆叠
+      let stackY = padT + barArea;
+      for (const [sit, mins] of sortedSits) {
+        const segH = maxMin > 0 ? (mins / maxMin) * barArea : 0;
+        if (segH < 1) continue;
+        stackY -= segH;
+        const color = stColors[sit] || stColors['默认'] || '#9E9E9E';
+        const rect = document.createElementNS(NS, 'rect');
+        rect.setAttribute('x', String(x)); rect.setAttribute('y', stackY.toFixed(1));
+        rect.setAttribute('width', String(barW)); rect.setAttribute('height', segH.toFixed(1));
+        rect.setAttribute('rx', '1'); rect.setAttribute('fill', color);
+        rect.setAttribute('opacity', '0.85');
+        svg.appendChild(rect);
+      }
+
       const label = document.createElementNS(NS, 'text');
       label.setAttribute('x', (x + barW / 2).toFixed(1));
       label.setAttribute('y', String(padT + barArea + 14));
@@ -792,13 +820,13 @@ class TimeIsGoldMainView extends ItemView {
       label.setAttribute('font-weight', isToday ? '700' : '400');
       label.textContent = WEEKDAY_NAMES[new Date(days[i]).getDay()];
       svg.appendChild(label);
-      if (dailyTotals[i] > 0) {
+      if (totalDay > 0) {
         const val = document.createElementNS(NS, 'text');
         val.setAttribute('x', (x + barW / 2).toFixed(1));
-        val.setAttribute('y', (y - 4).toFixed(1));
+        val.setAttribute('y', (stackY - 4).toFixed(1));
         val.setAttribute('text-anchor', 'middle'); val.setAttribute('font-size', '8');
-        val.setAttribute('fill', cMuted);
-        val.textContent = dailyTotals[i] >= 60 ? `${Math.round(dailyTotals[i] / 60)}h` : `${dailyTotals[i]}m`;
+        val.setAttribute('fill', isToday ? cAccent : cMuted);
+        val.textContent = totalDay >= 60 ? `${Math.round(totalDay / 60)}h` : `${totalDay}m`;
         svg.appendChild(val);
       }
     }
@@ -1017,7 +1045,11 @@ class TimeIsGoldMainView extends ItemView {
     const doAdd = async () => {
       const name = input.value.trim();
       if (!name) return;
-      await this.plugin.dataManager.addProject(name);
+      const dm = this.plugin.dataManager;
+      if (dm.hasProjectNamed(name)) {
+        new Notice(`⚠️ 已存在同名项目「${name}」，仍已创建`);
+      }
+      await dm.addProject(name);
       input.value = '';
       this.refreshQuickList();
       new Notice(`✅ 项目「${name}」已创建`);
@@ -1369,24 +1401,15 @@ class ProjectTreeView extends ItemView {
       progressRow.createSpan({ text: ` ${progress}%`, cls: 'tig-progress-text' });
     }
 
-    // ── 点击行：展开/折叠 或 记录 ──
-    row.addEventListener('click', async (e) => {
-      // 忽略操作按钮点击
+    // ── 点击行：仅展开/折叠（记录通过按钮）──
+    row.addEventListener('click', (e) => {
       if (e.target.closest('.tig-action-btn') || e.target.closest('.tig-tree-actions')) return;
-
       if (e.target === toggle || e.target.closest('.tig-tree-toggle')) {
         if (hasChildren) {
-          if (isExpanded) {
-            this.expandedNodes.delete(node.id);
-          } else {
-            this.expandedNodes.add(node.id);
-          }
+          if (isExpanded) this.expandedNodes.delete(node.id);
+          else this.expandedNodes.add(node.id);
           this.refreshTree();
         }
-      } else {
-        const entry = await dm.recordEntry(node.id);
-        new Notice(`🐾 ${node.name} — ${fmtDuration(entry.duration)}`);
-        this.refreshTree();
       }
     });
 
@@ -1773,20 +1796,67 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
           }
         }));
 
-    new Setting(containerEl)
+    this._buildFolderSetting(containerEl);
+  }
+
+  async _buildFolderSetting(containerEl) {
+    // 收集 Vault 内现有文件夹
+    const folders = new Set(['时迹数据']);
+    try {
+      const vaultRoot = this.app.vault.adapter;
+      const entries = await vaultRoot.list('/');
+      for (const e of entries) {
+        const name = e.replace(/\/$/, '');
+        if (name && !name.startsWith('.') && e.endsWith('/')) folders.add(name);
+      }
+    } catch(e) { /* 忽略 */ }
+
+    // 加上当前值
+    const current = this.plugin.settings.dataFolder || '时迹数据';
+    folders.add(current);
+
+    const setting = new Setting(containerEl)
       .setName('Vault 内文件夹')
-      .setDesc('数据文件 time-is-gold.json 的存放目录。如设为「考研/自律」，则存在 考研/自律/time-is-gold.json。仅 Vault 内模式生效。')
+      .setDesc('选中即自动迁移数据。如选「考研」，则存为 考研/time-is-gold.json')
+      .addDropdown(dropdown => {
+        const sorted = [...folders].sort();
+        for (const f of sorted) {
+          dropdown.addOption(f, f);
+        }
+        dropdown.addOption('__custom__', '📝 自定义...');
+        dropdown.setValue(sorted.includes(current) ? current : '__custom__');
+        
+        dropdown.onChange(async (value) => {
+          if (value === '__custom__') { return; } // 自定义由下方文本处理
+          const old = this.plugin.settings.dataFolder;
+          this.plugin.settings.dataFolder = value;
+          await this.plugin.saveSettings();
+          if (old !== value) {
+            await this.plugin.loadSharedData(); // 自动迁移
+            this.plugin.refreshAllViews();
+            new Notice(`✅ 数据已迁移到「${value}/」`);
+          }
+        });
+        return dropdown;
+      });
+
+    // 自定义路径文本输入
+    new Setting(containerEl)
+      .setName('自定义文件夹路径')
+      .setDesc('输入如「考研/自律记录」。下拉选「📝 自定义...」后生效')
       .addText(text => text
-        .setPlaceholder('时迹数据')
-        .setValue(this.plugin.settings.dataFolder || '时迹数据')
+        .setPlaceholder('考研/自律')
+        .setValue(current === '__custom__' || ![...folders].includes(current) ? current : '')
         .onChange(async (value) => {
-          const folder = value.trim() || '时迹数据';
+          const folder = value.trim();
+          if (!folder || folder === '__custom__') return;
           const old = this.plugin.settings.dataFolder;
           this.plugin.settings.dataFolder = folder;
           await this.plugin.saveSettings();
-          if (old !== folder && this.plugin.settings.dataLocation === 'vault') {
-            await this.plugin.loadSharedData();
+          if (old !== folder) {
+            await this.plugin.loadSharedData(); // 自动迁移
             this.plugin.refreshAllViews();
+            new Notice(`✅ 数据已迁移到「${folder}/」`);
           }
         }));
 
