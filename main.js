@@ -1801,20 +1801,11 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
 
   async _buildFolderSetting(containerEl) {
     const current = this.plugin.settings.dataFolder || '时迹数据';
-
-    // 收集一级文件夹
-    const topFolders = new Set(['时迹数据']);
-    try {
-      const entries = await this.app.vault.adapter.list('/');
-      for (const e of entries) {
-        const name = e.replace(/\/$/, '');
-        if (name && !name.startsWith('.') && e.endsWith('/')) topFolders.add(name);
-      }
-    } catch(e) { /* 忽略 */ }
-    // 当前值如果是一级文件夹也加入列表
-    if (current && !current.includes('/')) topFolders.add(current);
+    let pendingFolder = current;
 
     const migrate = async (folder) => {
+      folder = folder.trim();
+      if (!folder || folder === current) return;
       const old = this.plugin.settings.dataFolder;
       this.plugin.settings.dataFolder = folder;
       await this.plugin.saveSettings();
@@ -1826,19 +1817,41 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
     };
 
     // 自定义路径（置顶，支持深层路径如「考研/自律」）
-    new Setting(containerEl)
+    const pathSetting = new Setting(containerEl)
       .setName('数据文件夹')
-      .setDesc('自定义路径，如「考研/自律」。数据存为 路径/time-is-gold.json')
-      .addText(text => text
-        .setPlaceholder('时迹数据')
-        .setValue(current)
-        .onChange(async (value) => {
-          const folder = value.trim();
-          if (!folder) return;
-          await migrate(folder);
-        }));
+      .setDesc('输入后按回车或点保存生效')
+      .addText(text => {
+        text.setPlaceholder('时迹数据').setValue(current);
+        text.inputEl.addEventListener('keydown', async (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); await migrate(text.inputEl.value); }
+        });
+        text.inputEl.addEventListener('blur', async () => {
+          await migrate(text.inputEl.value);
+        });
+        return text;
+      });
 
-    // 快捷选择（一级文件夹下拉）
+    // 保存按钮
+    pathSetting.addButton(btn => btn
+      .setButtonText('保存')
+      .setCta()
+      .onClick(async () => {
+        const input = pathSetting.controlEl.querySelector('input');
+        if (input) await migrate(input.value);
+      }));
+
+    // 收集一级文件夹（适配 leading/trailing slash）
+    const topFolders = new Set(['时迹数据']);
+    try {
+      const entries = await this.app.vault.adapter.list('/');
+      for (const raw of entries) {
+        const e = raw.replace(/^\/+|\/+$/g, '');
+        if (e && !e.startsWith('.') && !e.includes('/') && raw.endsWith('/')) topFolders.add(e);
+      }
+    } catch(e) { /* 忽略 */ }
+    if (current && !current.includes('/')) topFolders.add(current);
+
+    // 快捷选择
     const sorted = [...topFolders].sort();
     const isTopLevel = current && !current.includes('/') && topFolders.has(current);
 
@@ -1854,6 +1867,9 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         dropdown.onChange(async (value) => {
           if (!value) return;
           await migrate(value);
+          // 同步文本输入框
+          const input = pathSetting.controlEl.querySelector('input');
+          if (input) input.value = value;
         });
         return dropdown;
       });
