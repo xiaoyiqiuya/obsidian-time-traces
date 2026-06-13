@@ -1697,6 +1697,10 @@ class TimeIsGoldMainView extends ItemView {
           gapRect.setAttribute('fill', 'var(--background-modifier-border)');
           gapRect.setAttribute('rx', '3'); gapRect.setAttribute('opacity', '0.4');
           gapRect.style.cursor = 'pointer';
+          gapRect.addEventListener('click', (evt) => {
+            evt.stopPropagation();
+            new QuickRecordModal(this.app, this.plugin, () => this.refreshTodayLog()).open();
+          });
           const gapTitle = document.createElementNS(NS, 'title');
           gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
           gapRect.appendChild(gapTitle);
@@ -1749,29 +1753,8 @@ class TimeIsGoldMainView extends ItemView {
       .setTitle(`✏️ 编辑: ${p?.name || '条目'} ${fmtDuration(entry.duration || 0)}`)
       .setDisabled(true));
 
-    menu.addItem(item => item.setTitle('⏰ 改开始时间').setIcon('clock').onClick(() => {
-      const t = prompt('开始时间 (HH:MM):', fmtTime(entry.startTime));
-      if (!t) return;
-      const parts = t.split(':');
-      if (parts.length !== 2) return;
-      const d = new Date(entry.startTime);
-      d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
-      entry.startTime = d.toISOString();
-      entry.duration = Math.round((new Date(entry.endTime) - d) / 60000);
-      if (entry.duration <= 0) entry.duration = 15;
-      this._saveEntryEdit(entry);
-    }));
-    menu.addItem(item => item.setTitle('⏰ 改结束时间').setIcon('clock').onClick(() => {
-      const t = prompt('结束时间 (HH:MM):', fmtTime(entry.endTime));
-      if (!t) return;
-      const parts = t.split(':');
-      if (parts.length !== 2) return;
-      const d = new Date(entry.endTime);
-      d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
-      entry.endTime = d.toISOString();
-      entry.duration = Math.round((d - new Date(entry.startTime)) / 60000);
-      if (entry.duration <= 0) entry.duration = 15;
-      this._saveEntryEdit(entry);
+    menu.addItem(item => item.setTitle('⏰ 改时间').setIcon('clock').onClick(() => {
+      this._showTimeEdit(entry);
     }));
 
     menu.addSeparator();
@@ -1800,6 +1783,56 @@ class TimeIsGoldMainView extends ItemView {
       await this._deleteLogEntry(entry);
     }));
     menu.showAtMouseEvent(evt);
+  }
+
+  _showTimeEdit(entry) {
+    const modal = new Modal(this.app);
+    modal.contentEl.addClass('tig-time-edit');
+    modal.contentEl.createEl('h4', { text: '编辑时间' });
+
+    const startD = new Date(entry.startTime);
+    const endD = new Date(entry.endTime);
+
+    const row1 = modal.contentEl.createDiv('tig-time-row');
+    row1.createSpan({ text: '开始 ' });
+    const sh = row1.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'23', value: String(startD.getHours()) } });
+    row1.createSpan({ text: ':' });
+    const sm = row1.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'59', value: String(startD.getMinutes()).padStart(2,'0') } });
+
+    const row2 = modal.contentEl.createDiv('tig-time-row');
+    row2.createSpan({ text: '结束 ' });
+    const eh = row2.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'23', value: String(endD.getHours()) } });
+    row2.createSpan({ text: ':' });
+    const em = row2.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'59', value: String(endD.getMinutes()).padStart(2,'0') } });
+
+    const durEl = modal.contentEl.createDiv('tig-time-dur');
+    durEl.setText(`时长: ${fmtDuration(entry.duration)}`);
+
+    const updateDur = () => {
+      const s = new Date(startD); s.setHours(parseInt(sh.value)||0, parseInt(sm.value)||0, 0, 0);
+      const e = new Date(endD); e.setHours(parseInt(eh.value)||0, parseInt(em.value)||0, 0, 0);
+      const d = Math.round((e - s) / 60000);
+      durEl.setText(`时长: ${d > 0 ? fmtDuration(d) : '⚠️ 无效'}`);
+    };
+    [sh, sm, eh, em].forEach(el => el.addEventListener('input', updateDur));
+
+    const btnRow = modal.contentEl.createDiv('tig-split-btns');
+    const saveBtn = btnRow.createEl('button', { text: '保存', cls: 'tig-split-confirm' });
+    saveBtn.addEventListener('click', () => {
+      const s = new Date(startD); s.setHours(parseInt(sh.value)||0, parseInt(sm.value)||0, 0, 0);
+      const e = new Date(endD); e.setHours(parseInt(eh.value)||0, parseInt(em.value)||0, 0, 0);
+      const d = Math.round((e - s) / 60000);
+      if (d <= 0) { new Notice('结束时间必须在开始时间之后'); return; }
+      entry.startTime = s.toISOString();
+      entry.endTime = e.toISOString();
+      entry.duration = d;
+      this._saveEntryEdit(entry);
+      modal.close();
+    });
+    const cancelBtn = btnRow.createEl('button', { text: '取消', cls: 'tig-split-skip' });
+    cancelBtn.addEventListener('click', () => modal.close());
+
+    modal.open();
   }
 
   _saveEntryEdit(entry) {

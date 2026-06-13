@@ -322,6 +322,8 @@
   flex-direction: column;
   gap: 6px;
   margin: 12px 0;
+  max-height: 280px;
+  overflow-y: auto;
 }
 .tig-modal-project-btn {
   padding: 10px 14px;
@@ -655,6 +657,13 @@
 .tig-split-disabled {
   opacity: 0.4; pointer-events: none; cursor: not-allowed;
 }
+.tig-time-edit { padding: 16px 20px; min-width: 260px; }
+.tig-time-edit h4 { margin: 0 0 12px 0; }
+.tig-time-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.tig-time-inp { width: 44px; padding: 4px 6px; text-align: center;
+  border: 1px solid var(--background-modifier-border); border-radius: 4px;
+  background: var(--background-primary); color: var(--text-normal); }
+.tig-time-dur { text-align: center; margin: 10px 0; font-weight: 600; }
 .tig-split-over {
   color: var(--text-error) !important;
 }
