@@ -1840,13 +1840,14 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         if (input) await migrate(input.value);
       }));
 
-    // 收集一级文件夹（适配 leading/trailing slash）
+    // 收集 Vault 一级文件夹
     const topFolders = new Set(['时迹数据']);
     try {
-      const entries = await this.app.vault.adapter.list('/');
-      for (const raw of entries) {
-        const e = raw.replace(/^\/+|\/+$/g, '');
-        if (e && !e.startsWith('.') && !e.includes('/') && raw.endsWith('/')) topFolders.add(e);
+      const result = await this.app.vault.adapter.list('/');
+      const allFolders = result.folders || [];
+      for (const name of allFolders) {
+        const clean = name.replace(/\/$/, '');
+        if (clean && !clean.startsWith('.')) topFolders.add(clean);
       }
     } catch(e) { /* 忽略 */ }
     if (current && !current.includes('/')) topFolders.add(current);
