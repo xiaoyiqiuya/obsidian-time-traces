@@ -307,6 +307,33 @@ class DataManager {
     return entry;
   }
 
+  // ── 空白记录（遗忘时间）──
+
+  async recordBlankEntry() {
+    const lastTime = this.data.lastRecordTime;
+    const endTime = new Date();
+    const startTime = lastTime ? new Date(lastTime) : new Date(endTime - 3600000);
+    let duration = Math.round((endTime - startTime) / 60000);
+    if (duration < 0) duration = 0;
+    if (duration === 0) return null;
+
+    const entry = {
+      id: uid(),
+      projectId: '__blank__',
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      duration,
+      note: '',
+      createdAt: nowISO()
+    };
+    const entries = this.data.entries || [];
+    entries.push(entry);
+    this.data.entries = entries;
+    this.data.lastRecordTime = endTime.toISOString();
+    await this.plugin.saveData();
+    return entry;
+  }
+
   // ── 长间隔检测 ──
 
   getGapInfo() {
@@ -440,6 +467,13 @@ class DataManager {
 
   getAllEntriesSorted() {
     return [...(this.data.entries || [])].sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
+  }
+
+  // 统计用（排除空白）
+  getEntriesForStats(dateSince) {
+    return (this.data.entries || [])
+      .filter(e => e.projectId !== '__blank__')
+      .filter(e => !dateSince || fmtDate(e.endTime) >= dateSince);
   }
 
   getLastRecordTime() {
@@ -848,7 +882,7 @@ class ProjectEditModal extends Modal {
         const existing = dm.findProjectByName(name);
         if (existing.length > 0) {
           const locations = existing.map(e => e.parentPath || '根目录').join('、');
-          if (!confirm(`已有同名项目「${name}」在「${locations}」。确定重复添加？`)) return;
+          if (!confirm(`已有同名项目「${name}」在「${locations}」。\n确认重复添加？`)) return;
         }
         await dm.addProject(name, null, color, situation);
       }
@@ -1147,7 +1181,7 @@ class TimeIsGoldMainView extends ItemView {
     // 堆叠柱：每天按情境分色
     const stColors = this.plugin.settings.situationColors || SITUATION_COLORS;
     for (let i = 0; i < 7; i++) {
-      const dayEntries = (this.plugin.data.entries || []).filter(x => fmtDate(x.endTime) === days[i]);
+      const dayEntries = (this.plugin.data.entries || []).filter(x => fmtDate(x.endTime) === days[i] && x.projectId !== '__blank__');
       // 按情境分组
       const sitMin = {};
       for (const e of dayEntries) {
@@ -1202,7 +1236,7 @@ class TimeIsGoldMainView extends ItemView {
   _renderMonthStats(area) {
     const dm = this.plugin.dataManager;
     const firstDay = getFirstOfMonth(new Date());
-    const entries = (this.plugin.data.entries || []).filter(e => fmtDate(e.endTime) >= firstDay);
+    const entries = dm.getEntriesForStats(firstDay);
     const pm = {};
     for (const e of entries) {
       const p = dm.getProject(e.projectId); const k = p ? p.name : '(已删除)';
@@ -1270,7 +1304,7 @@ class TimeIsGoldMainView extends ItemView {
   _renderSituationStats(area) {
     const dm = this.plugin.dataManager;
     const firstDay = getFirstOfMonth(new Date());
-    const entries = (this.plugin.data.entries || []).filter(e => fmtDate(e.endTime) >= firstDay);
+    const entries = dm.getEntriesForStats(firstDay);
     const sm = {};
     for (const e of entries) {
       const p = dm.getProject(e.projectId); const sit = p?.situation || '默认';
@@ -1344,7 +1378,7 @@ class TimeIsGoldMainView extends ItemView {
     this.timerEl = section.createDiv('tig-timer-display');
     this.updateStepTimer();
 
-    // 手动记录按钮
+    // 按钮行
     const btnRow = section.createDiv('tig-btn-row');
     const recordBtn = btnRow.createEl('button', {
       text: '📝 记录此刻',
@@ -1355,6 +1389,18 @@ class TimeIsGoldMainView extends ItemView {
         this.updateStepTimer();
         this.refreshTodayLog();
       }).open();
+    });
+    // 空白记录（只推进时间，不归属任何项目）
+    const blankBtn = btnRow.createEl('button', {
+      text: '⬜ 空白',
+      cls: 'tig-btn tig-btn-sm',
+      attr: { title: '遗忘/不想记录的时间' }
+    });
+    blankBtn.addEventListener('click', async () => {
+      await this.plugin.dataManager.recordBlankEntry();
+      this.updateStepTimer();
+      this.refreshTodayLog();
+      new Notice('⬜ 已跳过这段时间');
     });
   }
 
@@ -1418,7 +1464,7 @@ class TimeIsGoldMainView extends ItemView {
       const existing = dm.findProjectByName(name);
       if (existing.length > 0) {
         const locations = existing.map(e => e.parentPath || '根目录').join('、');
-        if (!confirm(`已有同名项目「${name}」在「${locations}」。确定重复添加？`)) return;
+        if (!confirm(`已有同名项目「${name}」在「${locations}」。\n确认重复添加？`)) return;
       }
       const situation = sitSelect.value;
       const color = this.plugin.settings.situationColors[situation] || '#9E9E9E';
@@ -1549,8 +1595,11 @@ class TimeIsGoldMainView extends ItemView {
     if (!this.logEl) return;
     this.logEl.empty();
 
-    const entries = this.plugin.dataManager.getTodayEntries().reverse();
+    const sortedEntries = this.plugin.dataManager.getTodayEntries();
+    // 时间轴可视化
+    this._renderTimeline(sortedEntries);
 
+    const entries = [...sortedEntries].reverse();
     if (entries.length === 0) {
       this.logEl.createEl('p', { text: '今天还没有记录', cls: 'tig-empty' });
       return;
@@ -1596,6 +1645,55 @@ class TimeIsGoldMainView extends ItemView {
     const totalRow = this.logEl.createDiv('tig-log-total');
     totalRow.createSpan({ text: '今日总计' });
     totalRow.createSpan({ text: fmtDuration(totalDay), cls: 'tig-log-total-dur' });
+  }
+
+  _renderTimeline(entries) {
+    if (!entries || entries.length === 0) return;
+    const dm = this.plugin.dataManager;
+    const stColors = this.plugin.settings.situationColors || SITUATION_COLORS;
+    const totalDayMin = entries.reduce((s, e) => s + (e.duration || 0), 0);
+    if (totalDayMin === 0) return;
+
+    const barH = 18, barW = 300;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${barW} ${barH}`);
+    svg.setAttribute('width', '100%'); svg.setAttribute('height', String(barH));
+    svg.style.marginBottom = '8px'; svg.style.borderRadius = '4px';
+
+    let x = 0;
+    for (const e of entries) {
+      const w = Math.max(2, (e.duration / totalDayMin) * barW);
+      const isBlank = e.projectId === '__blank__';
+      const p = isBlank ? null : dm.getProject(e.projectId);
+      const color = isBlank ? 'transparent' : (p?.color || '#9E9E9E');
+
+      const rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('y', '0');
+      rect.setAttribute('width', w.toFixed(1)); rect.setAttribute('height', String(barH));
+      if (isBlank) {
+        rect.setAttribute('fill', 'none'); 
+        rect.setAttribute('stroke', 'var(--text-faint)'); 
+        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('stroke-dasharray', '3,3');
+        rect.setAttribute('rx', '4');
+        rect.setAttribute('opacity', '0.5');
+      } else {
+        rect.setAttribute('fill', color);
+        rect.setAttribute('rx', '2');
+      }
+      rect.setAttribute('data-entry-id', e.id);
+      rect.style.cursor = 'pointer';
+      rect.addEventListener('click', (evt) => {
+        this._editLogEntry(e, evt);
+      });
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = `${isBlank ? '空白' : (p?.name || '?')} ${fmtDuration(e.duration)}`;
+      rect.appendChild(title);
+      svg.appendChild(rect);
+      x += w;
+    }
+    this.logEl.appendChild(svg);
   }
 
   _editLogEntry(entry, evt) {
@@ -2028,7 +2126,7 @@ class StatisticsView extends ItemView {
   renderMonthView() {
     const dm = this.plugin.dataManager;
     const firstDay = getFirstOfMonth(new Date());
-    const entries = (this.plugin.data.entries || []).filter(e => fmtDate(e.endTime) >= firstDay);
+    const entries = dm.getEntriesForStats(firstDay);
     const pm = {};
     for (const e of entries) {
       const p = dm.getProject(e.projectId); const k = p ? p.name : '(已删除)';
@@ -2097,7 +2195,7 @@ class StatisticsView extends ItemView {
   renderSituationView() {
     const dm = this.plugin.dataManager;
     const firstDay = getFirstOfMonth(new Date());
-    const entries = (this.plugin.data.entries || []).filter(e => fmtDate(e.endTime) >= firstDay);
+    const entries = dm.getEntriesForStats(firstDay);
     const sm = {};
     for (const e of entries) {
       const p = dm.getProject(e.projectId); const sit = p?.situation || '默认';
