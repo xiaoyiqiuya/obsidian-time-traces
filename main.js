@@ -1742,14 +1742,46 @@ class TimeIsGoldMainView extends ItemView {
     const dm = this.plugin.dataManager;
     const menu = new Menu();
     const projects = dm.getProjects();
+
+    // 标题：正在编辑的条目
+    const p = dm.getProject(entry.projectId);
+    menu.addItem(item => item
+      .setTitle(`✏️ 编辑: ${p?.name || '条目'} ${fmtDuration(entry.duration || 0)}`)
+      .setDisabled(true));
+
+    menu.addItem(item => item.setTitle('⏰ 改开始时间').setIcon('clock').onClick(() => {
+      const t = prompt('开始时间 (HH:MM):', fmtTime(entry.startTime));
+      if (!t) return;
+      const parts = t.split(':');
+      if (parts.length !== 2) return;
+      const d = new Date(entry.startTime);
+      d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
+      entry.startTime = d.toISOString();
+      entry.duration = Math.round((new Date(entry.endTime) - d) / 60000);
+      if (entry.duration <= 0) entry.duration = 15;
+      this._saveEntryEdit(entry);
+    }));
+    menu.addItem(item => item.setTitle('⏰ 改结束时间').setIcon('clock').onClick(() => {
+      const t = prompt('结束时间 (HH:MM):', fmtTime(entry.endTime));
+      if (!t) return;
+      const parts = t.split(':');
+      if (parts.length !== 2) return;
+      const d = new Date(entry.endTime);
+      d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
+      entry.endTime = d.toISOString();
+      entry.duration = Math.round((d - new Date(entry.startTime)) / 60000);
+      if (entry.duration <= 0) entry.duration = 15;
+      this._saveEntryEdit(entry);
+    }));
+
+    menu.addSeparator();
     menu.addItem(item => item.setTitle('📝 改项目').setIcon('pencil'));
     for (const p of projects) {
       menu.addItem(item => item
-        .setTitle('  ' + p.name)
+        .setTitle(p.name === (dm.getProject(entry.projectId)?.name || '') ? `  ✅ ${p.name}` : `  ${p.name}`)
         .onClick(async () => {
           entry.projectId = p.id;
-          await this.plugin.saveData();
-          this.refreshTodayLog();
+          this._saveEntryEdit(entry);
         }));
     }
     menu.addSeparator();
@@ -1758,13 +1790,9 @@ class TimeIsGoldMainView extends ItemView {
       menu.addItem(item => item
         .setTitle(`${delta > 0 ? '+' : ''}${delta}分钟`)
         .onClick(async () => {
-          entry.duration = Math.max(1, (entry.duration || 0) + delta);
-          const entries = this.plugin.data.entries || [];
-          const idx = entries.findIndex(e => e.id === entry.id);
-          if (idx !== -1) entries[idx].duration = entry.duration;
-          this.plugin.data.entries = entries;
-          await this.plugin.saveData();
-          this.refreshTodayLog();
+          entry.duration = Math.max(15, (entry.duration || 0) + delta);
+          entry.endTime = new Date(new Date(entry.startTime).getTime() + entry.duration * 60000).toISOString();
+          this._saveEntryEdit(entry);
         }));
     });
     menu.addSeparator();
@@ -1772,6 +1800,14 @@ class TimeIsGoldMainView extends ItemView {
       await this._deleteLogEntry(entry);
     }));
     menu.showAtMouseEvent(evt);
+  }
+
+  _saveEntryEdit(entry) {
+    const all = this.plugin.data.entries || [];
+    const idx = all.findIndex(e => e.id === entry.id);
+    if (idx !== -1) { all[idx] = entry; this.plugin.data.entries = all; }
+    this.plugin.saveData();
+    this.refreshTodayLog();
   }
 
   async _deleteLogEntry(entry) {

@@ -91,6 +91,8 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 .tig-project-btn {
   padding: 6px 14px;
