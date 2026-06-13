@@ -538,7 +538,10 @@ class SplitRecordModal extends Modal {
   }
 
   get totalGap() { return this.gapInfo.gapMinutes; }
-  get allocatedMin() { return this.items.reduce((s, i) => s + i.duration, 0); }
+  get allocatedMin() {
+    const itemSum = this.items.reduce((s, i) => s + i.duration, 0);
+    return itemSum + (this._mainItem ? this._mainItem.duration : 0);
+  }
 
   onOpen() {
     const { contentEl } = this;
@@ -561,10 +564,16 @@ class SplitRecordModal extends Modal {
       contentEl.createEl('p', { text: '💡 智能推荐', cls: 'tig-split-label' });
       this.recsEl = contentEl.createDiv('tig-split-recs');
       for (const r of recs) {
-        if (r.projectId === this.mainProjectId) continue; // 主项目单独显示
+        if (r.projectId === this.mainProjectId) continue;
         this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration);
       }
     }
+
+    // 主项目（可调时长，剩余自动归此然后变为未记录）
+    contentEl.createEl('p', { text: '📌 主项目', cls: 'tig-split-label' });
+    this.mainEl = contentEl.createDiv('tig-split-recs');
+    this._mainItem = { projectId: this.mainProjectId, name: mainProject?.name || '项目', color: mainProject?.color || '#9E9E9E', duration: this.totalGap };
+    this._renderMainRow();
 
     // 添加按钮（树形菜单 + 新建）
     const addRow = contentEl.createDiv('tig-split-add-row');
@@ -630,11 +639,11 @@ class SplitRecordModal extends Modal {
       cls: 'tig-split-confirm'
     });
     this.confirmBtn.addEventListener('click', async () => {
-      if (this.allocatedMin > this.totalGap) return; // 超限禁用
-      const remaining = this.remainingMin;
+      if (this.allocatedMin > this.totalGap) return;
       const entries = [...this.items];
-      if (remaining > 0) {
-        entries.push({ projectId: this.mainProjectId, duration: remaining, note: '' });
+      // 主项目（含用户调过的时长）
+      if (this._mainItem && this._mainItem.duration > 0) {
+        entries.push({ projectId: this._mainItem.projectId, duration: this._mainItem.duration, note: '' });
       }
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
@@ -675,6 +684,7 @@ class SplitRecordModal extends Modal {
     const update = () => {
       item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap));
       durEl.setText(fmtDuration(item.duration));
+      this._renderMainRow();
       this._refreshSummary();
     };
 
@@ -686,6 +696,37 @@ class SplitRecordModal extends Modal {
       this._refreshSummary();
     });
 
+    update();
+  }
+
+  _renderMainRow() {
+    if (!this.mainEl) return;
+    this.mainEl.empty();
+    const mi = this._mainItem;
+    // 主项目时长 = 总时长 - 其他项已分配
+    const otherSum = this.items.reduce((s, i) => s + i.duration, 0);
+    mi.duration = Math.max(0, this.totalGap - otherSum);
+
+    const row = this.mainEl.createDiv('tig-split-item');
+    const dot = row.createSpan('tig-split-dot');
+    dot.style.backgroundColor = mi.color;
+    row.createSpan({ text: mi.name, cls: 'tig-split-name' });
+    const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
+    const durEl = row.createSpan({ text: fmtDuration(mi.duration), cls: 'tig-split-dur' });
+    const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
+
+    const update = () => {
+      // 手动调主项目：允许 ≥0，但不能让总和超 totalGap
+      mi.duration = Math.max(0, Math.min(mi.duration, this.totalGap - otherSum));
+      durEl.setText(fmtDuration(mi.duration));
+      this._refreshSummary();
+    };
+    minus.addEventListener('click', () => { 
+      const surplus = otherSum + mi.duration - this.totalGap;
+      mi.duration -= (surplus > 0 ? this.defaultStep : this.defaultStep); 
+      update(); 
+    });
+    plus.addEventListener('click', () => { mi.duration += this.defaultStep; update(); });
     update();
   }
 
@@ -701,23 +742,16 @@ class SplitRecordModal extends Modal {
     const allocated = this.allocatedMin;
     const remaining = this.totalGap - allocated;
     const over = allocated > this.totalGap;
-    const mainProject = this.plugin.dataManager.getProject(this.mainProjectId);
 
     this.summaryEl.createSpan({
       text: over
         ? `⚠️ 已分配 ${fmtDuration(allocated)} ｜ 超出 ${fmtDuration(-remaining)}`
-        : `已分配 ${fmtDuration(allocated)} ｜ 剩余 ${fmtDuration(remaining)}`,
+        : remaining > 0
+          ? `已分配 ${fmtDuration(allocated)} ｜ 剩余 ${fmtDuration(remaining)}（将记为未记录）`
+          : `已分配 ${fmtDuration(allocated)} ✅`,
       cls: 'tig-split-stats' + (over ? ' tig-split-over' : '')
     });
 
-    if (!over && remaining > 0) {
-      this.summaryEl.createDiv({
-        text: `📌「${mainProject?.name || '项目'}」${fmtDuration(remaining)}（剩余自动归此）`,
-        cls: 'tig-split-main-hint'
-      });
-    }
-
-    // 超限时禁用确认按钮
     if (this.confirmBtn) {
       if (over) {
         this.confirmBtn.disabled = true;
@@ -1521,15 +1555,17 @@ class TimeIsGoldMainView extends ItemView {
       const durEl = row.createSpan('tig-log-dur');
       durEl.setText(fmtDuration(entry.duration));
 
+      // 点击条目 → 编辑/删
+      row.addEventListener('click', () => {
+        this._editLogEntry(entry);
+      });
+
       // 删除按钮
       const delBtn = row.createSpan('tig-log-del');
       delBtn.setText('×');
       delBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const entries = this.plugin.data.entries || [];
-        this.plugin.data.entries = entries.filter(e => e.id !== entry.id);
-        await this.plugin.saveData();
-        this.refreshTodayLog();
+        await this._deleteLogEntry(entry);
       });
     }
 
@@ -1537,6 +1573,57 @@ class TimeIsGoldMainView extends ItemView {
     const totalRow = this.logEl.createDiv('tig-log-total');
     totalRow.createSpan({ text: '今日总计' });
     totalRow.createSpan({ text: fmtDuration(totalDay), cls: 'tig-log-total-dur' });
+  }
+
+  _editLogEntry(entry) {
+    const dm = this.plugin.dataManager;
+    const menu = new Menu();
+    const projects = dm.getProjects();
+    menu.addItem(item => item.setTitle('📝 改项目').setIcon('pencil'));
+    for (const p of projects) {
+      menu.addItem(item => item
+        .setTitle('  ' + p.name)
+        .onClick(async () => {
+          entry.projectId = p.id;
+          await this.plugin.saveData();
+          this.refreshTodayLog();
+        }));
+    }
+    menu.addSeparator();
+    // 时长调节 ±15min
+    ['-15m', '+15m', '-30m', '+30m'].forEach(adj => {
+      const delta = parseInt(adj);
+      menu.addItem(item => item
+        .setTitle(`${delta > 0 ? '+' : ''}${delta}分钟`)
+        .onClick(async () => {
+          entry.duration = Math.max(1, (entry.duration || 0) + delta);
+          const entries = this.plugin.data.entries || [];
+          const idx = entries.findIndex(e => e.id === entry.id);
+          if (idx !== -1) entries[idx].duration = entry.duration;
+          this.plugin.data.entries = entries;
+          await this.plugin.saveData();
+          this.refreshTodayLog();
+        }));
+    });
+    menu.addSeparator();
+    menu.addItem(item => item.setTitle('🗑️ 删除').setIcon('trash').onClick(async () => {
+      await this._deleteLogEntry(entry);
+    }));
+    menu.showAtPosition({ x: 100, y: 200 });
+  }
+
+  async _deleteLogEntry(entry) {
+    const entries = (this.plugin.data.entries || []).filter(e => e.id !== entry.id);
+    this.plugin.data.entries = entries;
+    // 如果删除的是最后一条，更新 lastRecordTime
+    if (entries.length === 0) {
+      this.plugin.data.lastRecordTime = null;
+    } else {
+      this.plugin.data.lastRecordTime = entries[entries.length - 1].endTime;
+    }
+    await this.plugin.saveData();
+    this.refreshTodayLog();
+    new Notice('已删除');
   }
 }
 
