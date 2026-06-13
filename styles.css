@@ -772,6 +772,18 @@
   color: var(--text-muted); cursor: pointer; font-size: 14px;
 }
 .tig-split-del:hover { color: var(--text-error); }
+/* 排序按钮 */
+.tig-split-move {
+  display: flex; flex-direction: column; gap: 1px; margin-right: 2px;
+}
+.tig-split-move-btn {
+  width: 22px; height: 16px; border: none; background: transparent;
+  font-size: 8px; cursor: pointer; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; line-height: 1; border-radius: 2px;
+}
+.tig-split-move-btn:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
+.tig-split-move-disabled { opacity: 0.25; pointer-events: none; }
 .tig-split-add-row { margin: 8px 0; }
 .tig-split-add-btn {
   padding: 6px 14px; border: 1px dashed var(--background-modifier-border);
