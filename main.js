@@ -981,10 +981,11 @@ class SplitRecordModal extends Modal {
   _renderRow(parentEl, item, idx, totalItems) {
     const row = parentEl.createDiv('tig-split-item');
     if (item.isMain) row.addClass('tig-split-main');
-    else row.addClass('tig-split-draggable');
+    row.addClass('tig-split-draggable');
+    row.dataset.splitIdx = String(idx);
 
     const moveBtns = row.createSpan('tig-split-move');
-    if (!item.isMain && totalItems > 1) {
+    if (totalItems > 1) {
       const upBtn = moveBtns.createEl('button', { text: '▲', cls: 'tig-split-move-btn', attr: { title: '上移' } });
       const downBtn = moveBtns.createEl('button', { text: '▼', cls: 'tig-split-move-btn', attr: { title: '下移' } });
       if (idx === 0) upBtn.addClass('tig-split-move-disabled');
@@ -1013,86 +1014,104 @@ class SplitRecordModal extends Modal {
     minus.addEventListener('click', () => { item.duration -= this.defaultStep; update(); });
     plus.addEventListener('click', () => { item.duration += this.defaultStep; update(); });
 
-    // ── 长按拖拽排序 ──
-    if (!item.isMain) {
-      let longPressTimer = null;
-      let dragClone = null;
-      let startY = 0;
-      let rowRect = null;
+    // ── 长按拖拽排序（pointer 事件，兼容触屏+鼠标）──
+    let longPressTimer = null;
+    let dragClone = null;
+    let startY = 0;
+    let startX = 0;
+    let rowRect = null;
+    let dragging = false;
 
-      row.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button')) return; // 按钮不触发拖拽
-        rowRect = row.getBoundingClientRect();
-        startY = e.touches[0].clientY;
-        longPressTimer = setTimeout(() => {
-          // 进入拖拽模式
-          dragClone = row.cloneNode(true);
-          dragClone.addClass('tig-split-dragging');
-          dragClone.style.position = 'fixed';
-          dragClone.style.left = rowRect.left + 'px';
-          dragClone.style.top = rowRect.top + 'px';
-          dragClone.style.width = rowRect.width + 'px';
-          dragClone.style.zIndex = '1000';
-          dragClone.style.pointerEvents = 'none';
-          document.body.appendChild(dragClone);
-          row.addClass('tig-split-drag-source');
-        }, 600);
-      }, { passive: true });
+    const onDown = (e) => {
+      if (e.target.closest('button')) return;
+      rowRect = row.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      longPressTimer = setTimeout(() => {
+        dragging = true;
+        dragClone = row.cloneNode(true);
+        dragClone.addClass('tig-split-dragging');
+        dragClone.style.position = 'fixed';
+        dragClone.style.left = rowRect.left + 'px';
+        dragClone.style.top = rowRect.top + 'px';
+        dragClone.style.width = rowRect.width + 'px';
+        dragClone.style.zIndex = '1000';
+        dragClone.style.pointerEvents = 'none';
+        document.body.appendChild(dragClone);
+        row.addClass('tig-split-drag-source');
+        row.setPointerCapture(e.pointerId);
+      }, 500);
+    };
 
-      row.addEventListener('touchmove', (e) => {
-        if (!dragClone) { clearTimeout(longPressTimer); return; }
-        e.preventDefault();
-        const y = e.touches[0].clientY;
-        dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
-        // 高亮目标位置
-        const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
-        rows.forEach(r => r.classList.remove('tig-split-drop-target'));
-        let targetIdx = -1;
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          const rect = r.getBoundingClientRect();
-          if (y < rect.top + rect.height / 2) { targetIdx = i; break; }
-          targetIdx = i + 1;
-        }
-        if (targetIdx >= 0 && targetIdx < rows.length) {
-          rows[targetIdx].classList.add('tig-split-drop-target');
-        }
-      }, { passive: false });
+    const onMove = (e) => {
+      if (!dragging) { clearTimeout(longPressTimer); return; }
+      e.preventDefault();
+      const y = e.clientY;
+      dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
+      dragClone.style.left = rowRect.left + 'px';
+      const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
+      rows.forEach(r => r.classList.remove('tig-split-drop-target'));
+      let targetIdx = rows.length - 1;
+      for (let i = 0; i < rows.length; i++) {
+        const rect = rows[i].getBoundingClientRect();
+        if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
+      }
+      if (targetIdx >= 0 && targetIdx < rows.length) {
+        rows[targetIdx].classList.add('tig-split-drop-target');
+      }
+    };
 
-      row.addEventListener('touchend', () => {
-        clearTimeout(longPressTimer);
-        if (!dragClone) return;
-        // 找到目标位置并移动
-        const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
-        rows.forEach(r => r.classList.remove('tig-split-drop-target'));
-        const y = dragClone.getBoundingClientRect().top + dragClone.getBoundingClientRect().height / 2;
-        let targetIdx = this.items.length;
-        for (let i = 0; i < rows.length; i++) {
-          const rect = rows[i].getBoundingClientRect();
-          if (y < rect.top + rect.height / 2) { targetIdx = i; break; }
-        }
-        // 重新排序
-        const moved = this.items.splice(idx, 1)[0];
-        const insertAt = Math.min(targetIdx, this.items.length);
-        this.items.splice(insertAt, 0, moved);
-        // 清理
-        dragClone.remove();
-        row.removeClass('tig-split-drag-source');
-        this._renderAll();
-      });
+    const onUp = () => {
+      clearTimeout(longPressTimer);
+      if (!dragging) return;
+      dragging = false;
+      const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
+      rows.forEach(r => r.classList.remove('tig-split-drop-target'));
+      if (!dragClone) return;
+      const y = dragClone.getBoundingClientRect().top + dragClone.getBoundingClientRect().height / 2;
+      let targetIdx = this.items.length - 1;
+      for (let i = 0; i < rows.length; i++) {
+        const rect = rows[i].getBoundingClientRect();
+        if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
+      }
+      const moved = this.items.splice(idx, 1)[0];
+      const insertAt = Math.min(targetIdx + 1, this.items.length);
+      this.items.splice(insertAt, 0, moved);
+      dragClone.remove();
+      dragClone = null;
+      row.removeClass('tig-split-drag-source');
+      this._renderAll();
+    };
 
-      row.addEventListener('touchcancel', () => {
-        clearTimeout(longPressTimer);
-        if (dragClone) { dragClone.remove(); row.removeClass('tig-split-drag-source'); }
-      });
-    }
+    row.addEventListener('pointerdown', onDown);
+    row.addEventListener('pointermove', onMove);
+    row.addEventListener('pointerup', onUp);
+    row.addEventListener('pointercancel', () => {
+      clearTimeout(longPressTimer); dragging = false;
+      if (dragClone) { dragClone.remove(); dragClone = null; row.removeClass('tig-split-drag-source'); }
+    });
+    row.style.touchAction = 'none';
   }
 
   _moveItem(idx, dir) {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= this.items.length) return;
-    [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-    this._renderAll();
+    // 动画交换
+    const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
+    const rowA = rows[idx];
+    const rowB = rows[newIdx];
+    if (rowA && rowB) {
+      const h = rowA.getBoundingClientRect().height + 4; // 4 = gap
+      rowA.style.transform = `translateY(${dir > 0 ? h : -h}px)`;
+      rowB.style.transform = `translateY(${dir > 0 ? -h : h}px)`;
+      setTimeout(() => {
+        [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
+        this._renderAll();
+      }, 180);
+    } else {
+      [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
+      this._renderAll();
+    }
   }
 
   _renderSummary() {

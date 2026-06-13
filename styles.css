@@ -785,7 +785,7 @@
 .tig-split-move-btn:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
 .tig-split-move-disabled { opacity: 0.25; pointer-events: none; }
 /* 拖拽排序 */
-.tig-split-draggable { transition: transform 0.15s; }
+.tig-split-draggable { transition: transform 0.18s ease; }
 .tig-split-dragging {
   opacity: 0.92; transform: scale(1.03);
   box-shadow: 0 4px 16px rgba(0,0,0,0.25);
