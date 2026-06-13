@@ -334,6 +334,34 @@ class DataManager {
     return entry;
   }
 
+  // ── 间隙填补（用于时间轴点击未记录时段）──
+
+  async recordGapEntry(projectId, startTimeISO, endTimeISO, note = '') {
+    const startTime = new Date(startTimeISO);
+    const endTime = new Date(endTimeISO);
+    let duration = Math.round((endTime - startTime) / 60000);
+    if (duration < 0) duration = 0;
+    if (duration === 0) return null;
+
+    const entry = {
+      id: uid(),
+      projectId,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      duration,
+      note,
+      createdAt: nowISO()
+    };
+    const entries = this.data.entries || [];
+    entries.push(entry);
+    // 保持按 startTime 升序（时间轴依赖此顺序）
+    entries.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    this.data.entries = entries;
+    // 不更新 lastRecordTime —— 填补的是过去的时间段
+    await this.plugin.saveData();
+    return entry;
+  }
+
   // ── 长间隔检测 ──
 
   getGapInfo() {
@@ -349,7 +377,8 @@ class DataManager {
     };
   }
 
-  // ── 智能推荐（时段 + 星期）──
+  // ── 智能推荐（全数据驱动，零字段依赖）──
+  // 六维信号：①时间邻近度 ②节律匹配 ③衰减记忆 ④连续活跃 ⑤时段合理性 ⑥今日配额
 
   getSmartRecommendations(gapMinutes) {
     const entries = this.data.entries || [];
@@ -357,58 +386,145 @@ class DataManager {
 
     const now = new Date();
     const currentHour = now.getHours();
-    const currentDay = now.getDay();
-    const pastEntries = entries.filter(e => {
+    const currentDay = now.getDay(); // 0=Sun..6=Sat
+    const todayStr = fmtDate(now.toISOString());
+    const windowDays = 60;
+    const decayHalf = 10; // 半衰期 ~7天（ln2 × 10 ≈ 7）
+
+    // ── 单次遍历：为每个条目打分 + 收集各项目统计 ──
+    const projectAcc = new Map(); // pid → accumulator
+
+    for (const e of entries) {
+      if (e.projectId === '__blank__') continue;
       const d = new Date(e.endTime);
       const daysAgo = (now - d) / 86400000;
-      return daysAgo <= 14;
-    });
+      if (daysAgo > windowDays) continue;
 
-    const projectScores = new Map();
-    for (const e of pastEntries) {
-      const d = new Date(e.endTime);
       const hour = d.getHours();
       const day = d.getDay();
-      let score = 0;
-      // 同时段 ±2h
-      if (Math.abs(hour - currentHour) <= 2) score += 3;
-      // 同星期
-      if (day === currentDay) score += 2;
-      // 最近 3 天加分
-      if ((now - d) / 86400000 <= 3) score += 1;
+      const date = fmtDate(e.endTime);
+      const decay = Math.exp(-daysAgo / decayHalf);
+      // ① 时间邻近度：平滑衰减，±4h 归零
+      const proximity = Math.max(0, 1 - Math.abs(hour - currentHour) / 4);
+      const entryScore = proximity * decay;
 
-      if (score > 0 && e.projectId) {
-        const existing = projectScores.get(e.projectId) || { score: 0, totalMin: 0, count: 0, lastHour: 0 };
-        existing.score += score;
-        existing.totalMin += e.duration || 0;
-        existing.count += 1;
-        existing.lastHour = Math.max(existing.lastHour, hour);
-        projectScores.set(e.projectId, existing);
+      let acc = projectAcc.get(e.projectId);
+      if (!acc) {
+        acc = {
+          totalScore: 0,
+          durations: [],
+          lastHour: 0,
+          dates: new Set(),        // 出现过哪些日期
+          slotHits: 0,             // ±3h 时段内命中
+          totalCount: 0,
+          dayCounts: [0,0,0,0,0,0,0], // Sun..Sat
+          todayCount: 0
+        };
+        projectAcc.set(e.projectId, acc);
       }
+
+      acc.totalScore += entryScore;
+      acc.durations.push(e.duration || 0);
+      acc.lastHour = Math.max(acc.lastHour, hour);
+      acc.dates.add(date);
+      acc.totalCount++;
+      if (Math.abs(hour - currentHour) <= 3) acc.slotHits++;
+      acc.dayCounts[day]++;
+      if (date === todayStr) acc.todayCount++;
     }
 
-    // 排序：得分高 → 时长多 → 频次高
-    const ranked = [...projectScores.entries()]
-      .sort((a, b) => b[1].score - a[1].score || b[1].totalMin - a[1].totalMin)
-      .slice(0, 4);
+    if (projectAcc.size === 0) return [];
 
-    // 生成推荐：推算时长和时段
-    const totalRecommendMin = ranked.reduce((s, [, v]) => s + Math.round(v.totalMin / v.count), 0) || 1;
-    const scale = Math.min(gapMinutes / totalRecommendMin, 2); // 不超 2 倍
+    // ── 计算每个项目的最终得分 ──
+    const results = [];
+    for (const [pid, acc] of projectAcc) {
+      let score = acc.totalScore;
 
-    const recommendations = ranked.map(([pid, stats]) => {
-      const p = this.getProject(pid);
-      const avgMin = Math.round(stats.totalMin / stats.count);
-      return {
+      // ② 节律匹配：该项目在同星期几的比例
+      const dayRatio = acc.dayCounts[currentDay] / acc.totalCount;
+      if (dayRatio > 0.3) score += 3 * dayRatio;
+
+      // ④ 连续活跃：近7天连续出现天数
+      const consecutive = this._countRecentStreak(acc.dates, 7);
+      score += consecutive * 1.5;
+
+      // ⑤ 时段合理性：该项目在此时段(±3h)出现过吗
+      const slotRatio = acc.slotHits / acc.totalCount;
+      if (acc.slotHits === 0) score *= 0.3;
+
+      // ⑥ 今日配额：今天次数是否已触及历史单日上限
+      if (acc.todayCount > 0) {
+        const dailyMax = this._getProjectDailyMax(pid, 60);
+        if (acc.todayCount >= dailyMax && acc.slotHits === 0) {
+          score *= 0.15;
+        }
+      }
+
+      // ⑦ 时长：中位数
+      const sortedDur = [...acc.durations].sort((a, b) => a - b);
+      const median = sortedDur[Math.floor(sortedDur.length / 2)] || 30;
+
+      results.push({
         projectId: pid,
+        score,
+        medianDuration: median,
+        lastHour: acc.lastHour
+      });
+    }
+
+    // 排序，取 Top 4
+    results.sort((a, b) => b.score - a.score);
+    const top = results.slice(0, 4);
+
+    // 生成推荐：按比例分配 gap
+    const totalAvg = top.reduce((s, r) => s + r.medianDuration, 0) || 1;
+    const scale = Math.min(gapMinutes / totalAvg, 2);
+
+    return top.map(r => {
+      const p = this.getProject(r.projectId);
+      return {
+        projectId: r.projectId,
         name: p ? p.name : '(已删除)',
         color: p?.color || '#9E9E9E',
-        duration: Math.min(Math.round(avgMin * scale), gapMinutes),
-        slotHour: stats.lastHour
+        duration: Math.min(Math.round(r.medianDuration * scale), gapMinutes),
+        slotHour: r.lastHour
       };
     });
+  }
 
-    return recommendations;
+  // ── 辅助：项目近N天连续出现天数 ──
+  _countRecentStreak(dates, days) {
+    let streak = 0;
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const ds = fmtDate(d.toISOString());
+      if (dates.has(ds)) streak++;
+      else break; // 断开即停
+    }
+    return streak;
+  }
+
+  // ── 辅助：项目历史单日最大条目数（p95）──
+  _getProjectDailyMax(projectId, windowDays) {
+    const entries = this.data.entries || [];
+    const dailyCounts = new Map(); // date → count
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - windowDays);
+
+    for (const e of entries) {
+      if (e.projectId !== projectId) continue;
+      const d = new Date(e.endTime);
+      if (d < cutoff) continue;
+      const ds = fmtDate(e.endTime);
+      dailyCounts.set(ds, (dailyCounts.get(ds) || 0) + 1);
+    }
+
+    if (dailyCounts.size === 0) return 1;
+    const counts = [...dailyCounts.values()].sort((a, b) => b - a);
+    // p95：取前 5% 位置的值，最小为 1
+    const idx = Math.max(0, Math.floor(counts.length * 0.05));
+    return Math.max(1, counts[idx] || 1);
   }
 
   // ── 分账写入 ──
@@ -498,26 +614,65 @@ class DataManager {
 // ═══════════════════════════════════════════
 
 class QuickRecordModal extends Modal {
-  constructor(app, plugin, onSubmit) {
+  // gapContext（可选）: { startTime: ISO, endTime: ISO, gapMin: number }
+  //   从时间轴间隙进入时传入，用于填补过去的时间段
+  constructor(app, plugin, onSubmit, gapContext = null) {
     super(app);
     this.plugin = plugin;
     this.onSubmit = onSubmit;
+    this.gapContext = gapContext;
+    this.listMode = 'situation'; // 'situation' | 'hierarchy' —— 全部项目的分组方式
+  }
+
+  // ── 统一的记录动作 ──
+  async _doRecord(projectId) {
+    const dm = this.plugin.dataManager;
+    if (this.gapContext && this.gapContext.startTime && this.gapContext.endTime) {
+      await dm.recordGapEntry(projectId, this.gapContext.startTime, this.gapContext.endTime);
+    } else {
+      await dm.recordEntry(projectId);
+      new Notice(`🐾 ${dm.getProject(projectId)?.name || '项目'} — 已记录`);
+    }
+    if (this.onSubmit) this.onSubmit();
+    this.close();
+  }
+
+  // ── 渲染一个可点击的项目行 ──
+  _renderProjectRow(container, p) {
+    const dm = this.plugin.dataManager;
+    const row = container.createDiv('tig-modal-item');
+    const colorDot = row.createSpan('tig-color-dot');
+    colorDot.style.backgroundColor = p.color || '#9E9E9E';
+    row.createSpan({ text: p.name, cls: 'tig-modal-item-name' });
+    const total = dm.getProjectTotalMinutes(p.id);
+    row.createSpan({ text: fmtDuration(total), cls: 'tig-modal-item-dur' });
+    row.addEventListener('click', () => this._doRecord(p.id));
+    return row;
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass('tig-modal');
-    contentEl.createEl('h3', { text: '🐾 快速记录' });
     
     const dm = this.plugin.dataManager;
-    const lastTime = dm.getLastRecordTime();
-    
-    if (lastTime) {
-      const diff = Math.round((new Date() - new Date(lastTime)) / 60000);
-      contentEl.createEl('p', { text: `距上次记录已过 ${fmtDuration(diff)}`, cls: 'tig-modal-hint' });
+    const isGapFill = !!(this.gapContext && this.gapContext.startTime && this.gapContext.endTime);
+
+    if (isGapFill) {
+      const gapMin = this.gapContext.gapMin || Math.round((new Date(this.gapContext.endTime) - new Date(this.gapContext.startTime)) / 60000);
+      contentEl.createEl('h3', { text: '🐾 分配时间' });
+      contentEl.createEl('p', { 
+        text: `${fmtTime(this.gapContext.startTime)} → ${fmtTime(this.gapContext.endTime)}（${fmtDuration(gapMin)}）`,
+        cls: 'tig-modal-hint' 
+      });
+    } else {
+      contentEl.createEl('h3', { text: '🐾 快速记录' });
+      const lastTime = dm.getLastRecordTime();
+      if (lastTime) {
+        const diff = Math.round((new Date() - new Date(lastTime)) / 60000);
+        contentEl.createEl('p', { text: `距上次记录已过 ${fmtDuration(diff)}`, cls: 'tig-modal-hint' });
+      }
     }
 
-    // 项目选择
     const projects = dm.getProjects();
     
     if (projects.length === 0) {
@@ -529,33 +684,93 @@ class QuickRecordModal extends Modal {
         const name = input.value.trim();
         if (!name) return;
         const project = await dm.addProject(name);
-        this.plugin.maybeRecord(project.id, () => {
-          if (this.onSubmit) this.onSubmit();
-        });
-        this.close();
+        await this._doRecord(project.id);
       });
       return;
     }
 
-    // 最近使用的项目
+    // ── ❶ 5 个快捷项目（智能推荐，与快捷项目区一致）──
     const recent = dm.getRecentProjects(5);
-    const list = contentEl.createDiv('tig-modal-list');
-    
+    const recentIds = new Set(recent.map(p => p.id));
+    const quickLabel = contentEl.createEl('p', { text: '💡 智能推荐', cls: 'tig-modal-label' });
+    const quickList = contentEl.createDiv('tig-modal-list');
     for (const p of recent) {
-      const row = list.createDiv('tig-modal-item');
-      const colorDot = row.createSpan('tig-color-dot');
-      colorDot.style.backgroundColor = p.color || '#9E9E9E';
-      
-      const nameEl = row.createSpan({ text: p.name, cls: 'tig-modal-item-name' });
-      const total = dm.getProjectTotalMinutes(p.id);
-      const durEl = row.createSpan({ text: fmtDuration(total), cls: 'tig-modal-item-dur' });
-      
-      row.addEventListener('click', () => {
-        this.plugin.maybeRecord(p.id, () => {
-          if (this.onSubmit) this.onSubmit();
-        });
-        this.close();
+      this._renderProjectRow(quickList, p);
+    }
+
+    // ── 分隔线 ──
+    contentEl.createEl('hr', { cls: 'tig-modal-divider' });
+
+    // ── ❷ 全部项目（带场景/层级切换）──
+    const allHeader = contentEl.createDiv('tig-modal-all-header');
+    allHeader.createSpan({ text: '📋 全部项目', cls: 'tig-modal-label' });
+    const modeBtns = allHeader.createDiv('tig-mode-btns');
+    const sitBtn = modeBtns.createEl('button', { text: '📂 情景', cls: 'tig-btn tig-btn-sm tig-mode-active', attr: { title: '按情景分组' } });
+    const hierBtn = modeBtns.createEl('button', { text: '🌿 层级', cls: 'tig-btn tig-btn-sm', attr: { title: '按层级' } });
+    sitBtn.addEventListener('click', () => {
+      this.listMode = 'situation';
+      sitBtn.addClass('tig-mode-active'); hierBtn.removeClass('tig-mode-active');
+      this._renderAllList(allList, dm, projects, recentIds);
+    });
+    hierBtn.addEventListener('click', () => {
+      this.listMode = 'hierarchy';
+      hierBtn.addClass('tig-mode-active'); sitBtn.removeClass('tig-mode-active');
+      this._renderAllList(allList, dm, projects, recentIds);
+    });
+
+    const allList = contentEl.createDiv('tig-modal-all-list');
+    this._renderAllList(allList, dm, projects, recentIds);
+  }
+
+  // ── 渲染全部项目列表（按当前 listMode 分组）──
+  _renderAllList(container, dm, projects, recentIds) {
+    container.empty();
+
+    if (this.listMode === 'situation') {
+      // ── 按情景分组 ──
+      const sitMap = new Map();
+      const situations = Object.keys(this.plugin.settings.situationColors || SITUATION_COLORS);
+      for (const p of projects) {
+        const sit = p.situation || this.plugin.settings.defaultSituation || '默认';
+        if (!sitMap.has(sit)) sitMap.set(sit, []);
+        sitMap.get(sit).push(p);
+      }
+      // 按情境配置顺序排列
+      const sortedSits = [...sitMap.keys()].sort((a, b) => {
+        const ia = situations.indexOf(a), ib = situations.indexOf(b);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.localeCompare(b, 'zh-CN');
       });
+
+      for (const sit of sortedSits) {
+        const projs = sitMap.get(sit);
+        const sitHeader = container.createDiv('tig-modal-scene-header');
+        const color = this.plugin.settings.situationColors?.[sit] || SITUATION_COLORS[sit] || '#9E9E9E';
+        const dot = sitHeader.createSpan('tig-color-dot');
+        dot.style.backgroundColor = color;
+        sitHeader.createSpan({ text: `${sit}（${projs.length}）`, cls: 'tig-modal-scene-label' });
+        for (const p of projs) {
+          const row = this._renderProjectRow(container, p);
+          if (recentIds.has(p.id)) row.addClass('tig-modal-item-recent');
+        }
+      }
+    } else {
+      // ── 按层级（树状）──
+      const tree = dm.getProjectTree(null);
+      this._renderTreeList(container, tree, recentIds, 0);
+    }
+  }
+
+  _renderTreeList(container, nodes, recentIds, depth) {
+    for (const node of nodes) {
+      const row = this._renderProjectRow(container, node);
+      row.style.paddingLeft = `${depth * 14 + 12}px`;
+      if (recentIds.has(node.id)) row.addClass('tig-modal-item-recent');
+      if (node.children && node.children.length > 0) {
+        this._renderTreeList(container, node.children, recentIds, depth + 1);
+      }
     }
   }
 
@@ -927,6 +1142,7 @@ class TimeIsGoldMainView extends ItemView {
     this.activeTab = 'timer'; // 'timer' | 'tree' | 'stats'
     this.refreshTimer = null;
     this.expandedNodes = new Set(); // 项目树展开状态
+    this.treeViewMode = 'hierarchy'; // 'hierarchy' | 'situation'
   }
 
   getViewType() { return VIEW_TYPE_MAIN; }
@@ -1010,14 +1226,27 @@ class TimeIsGoldMainView extends ItemView {
   renderTreePanel() {
     const dm = this.plugin.dataManager;
     const container = this.contentArea;
-    container.empty(); // 先清空，避免重复渲染
+    container.empty();
 
     const header = container.createDiv('tig-section-header');
     header.createEl('div', { text: '🌳 人生之树', cls: 'tig-section-title' });
+    
+    // 视图切换按钮
+    const modeBtns = header.createDiv('tig-mode-btns');
+    const hierBtn = modeBtns.createEl('button', { text: '🌿', cls: 'tig-btn tig-btn-sm' + (this.treeViewMode === 'hierarchy' ? ' tig-mode-active' : ''), attr: { title: '按层级' } });
+    const sitBtn = modeBtns.createEl('button', { text: '📂', cls: 'tig-btn tig-btn-sm' + (this.treeViewMode === 'situation' ? ' tig-mode-active' : ''), attr: { title: '按情景' } });
+    hierBtn.addEventListener('click', () => { this.treeViewMode = 'hierarchy'; this.renderTreePanel(); });
+    sitBtn.addEventListener('click', () => { this.treeViewMode = 'situation'; this.renderTreePanel(); });
+    
     const addBtn = header.createEl('button', { text: '+ 新项目', cls: 'tig-btn tig-btn-sm' });
     addBtn.addEventListener('click', () => {
       new ProjectEditModal(this.app, this.plugin, null, () => this.renderTreePanel()).open();
     });
+
+    if (this.treeViewMode === 'situation') {
+      this._renderSitTreePanel(container, dm);
+      return;
+    }
 
     const tree = dm.getProjectTree(null);
     if (tree.length === 0) {
@@ -1027,6 +1256,61 @@ class TimeIsGoldMainView extends ItemView {
     this.treeEl = container.createDiv('tig-tree');
     for (const node of tree) {
       this._renderTreeNode(this.treeEl, node, 0);
+    }
+    container.createEl('p', { text: '💡 点击节点记录 | 右键/长按更多操作', cls: 'tig-context-hint' });
+  }
+
+  _renderSitTreePanel(container, dm) {
+    const projects = dm.getProjects();
+    if (projects.length === 0) {
+      container.createEl('p', { text: '🌱 创建你的第一个项目吧', cls: 'tig-empty' });
+      return;
+    }
+
+    const situations = Object.keys(this.plugin.settings.situationColors || SITUATION_COLORS);
+    const sitMap = new Map();
+    for (const p of projects) {
+      const sit = p.situation || this.plugin.settings.defaultSituation || '默认';
+      if (!sitMap.has(sit)) sitMap.set(sit, []);
+      sitMap.get(sit).push(p);
+    }
+
+    const sortedSits = [...sitMap.keys()].sort((a, b) => {
+      const ia = situations.indexOf(a), ib = situations.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b, 'zh-CN');
+    });
+
+    this.treeEl = container.createDiv('tig-tree');
+    for (const sit of sortedSits) {
+      const projs = sitMap.get(sit);
+      const sitTotal = projs.reduce((s, p) => s + dm.getProjectTotalMinutes(p.id), 0);
+      const color = this.plugin.settings.situationColors?.[sit] || SITUATION_COLORS[sit] || '#9E9E9E';
+      
+      const sitHeader = this.treeEl.createDiv('tig-scene-header');
+      const toggle = sitHeader.createSpan('tig-tree-toggle');
+      toggle.setText('▶');
+      const dot = sitHeader.createSpan('tig-color-dot');
+      dot.style.backgroundColor = color;
+      const label = sitHeader.createSpan('tig-scene-label');
+      label.setText(`${sit}（${projs.length}）`);
+      const sitDur = sitHeader.createSpan('tig-scene-dur');
+      sitDur.setText(fmtDuration(sitTotal));
+      
+      const sitBody = this.treeEl.createDiv('tig-scene-body');
+      sitBody.style.display = 'none';
+      
+      sitHeader.addEventListener('click', () => {
+        const hidden = sitBody.style.display === 'none';
+        sitBody.style.display = hidden ? 'block' : 'none';
+        toggle.setText(hidden ? '▼' : '▶');
+      });
+      
+      for (const p of projs) {
+        this._renderTreeNode(sitBody, { ...p, children: [], totalMinutes: dm.getProjectTotalMinutes(p.id) }, 0);
+      }
     }
     container.createEl('p', { text: '💡 点击节点记录 | 右键/长按更多操作', cls: 'tig-context-hint' });
   }
@@ -1499,7 +1783,7 @@ class TimeIsGoldMainView extends ItemView {
     if (!this.quickListEl) return;
     this.quickListEl.empty();
 
-    const projects = this.plugin.dataManager.getRecentProjects(8);
+    const projects = this.plugin.dataManager.getRecentProjects(5);
 
     if (projects.length === 0) {
       this.quickListEl.createEl('p', { text: '还没有项目', cls: 'tig-empty' });
@@ -1699,7 +1983,15 @@ class TimeIsGoldMainView extends ItemView {
           gapRect.style.cursor = 'pointer';
           gapRect.addEventListener('click', (evt) => {
             evt.stopPropagation();
-            new QuickRecordModal(this.app, this.plugin, () => this.refreshTodayLog()).open();
+            const gapCtx = {
+              startTime: prevEnd.toISOString(),
+              endTime: startTime.toISOString(),
+              gapMin: Math.round(gapMin)
+            };
+            new QuickRecordModal(this.app, this.plugin, () => {
+              this.refreshTodayLog();
+              new Notice('✅ 时间段已分配');
+            }, gapCtx).open();
           });
           const gapTitle = document.createElementNS(NS, 'title');
           gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
@@ -1867,6 +2159,7 @@ class ProjectTreeView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.expandedNodes = new Set();
+    this.viewMode = 'hierarchy'; // 'hierarchy' | 'situation'
   }
 
   getViewType() { return VIEW_TYPE_PROJECT_TREE; }
@@ -1882,6 +2175,23 @@ class ProjectTreeView extends ItemView {
     try {
       const header = container.createDiv('tig-section-header');
       header.createEl('div', { text: '🌳 人生之树', cls: 'tig-section-title' });
+      
+      // 视图切换按钮组
+      const modeBtns = header.createDiv('tig-mode-btns');
+      const hierBtn = modeBtns.createEl('button', { text: '🌿', cls: 'tig-btn tig-btn-sm tig-mode-active', attr: { title: '按层级' } });
+      const sitBtn = modeBtns.createEl('button', { text: '📂', cls: 'tig-btn tig-btn-sm', attr: { title: '按情景' } });
+      hierBtn.addEventListener('click', () => {
+        this.viewMode = 'hierarchy';
+        hierBtn.addClass('tig-mode-active');
+        sitBtn.removeClass('tig-mode-active');
+        this.refreshTree();
+      });
+      sitBtn.addEventListener('click', () => {
+        this.viewMode = 'situation';
+        sitBtn.addClass('tig-mode-active');
+        hierBtn.removeClass('tig-mode-active');
+        this.refreshTree();
+      });
       
       const addBtn = header.createEl('button', {
         text: '+ 新项目',
@@ -1903,6 +2213,12 @@ class ProjectTreeView extends ItemView {
     if (!this.treeEl) return;
     this.treeEl.empty();
 
+    if (this.viewMode === 'situation') {
+      this._renderSitTree();
+      return;
+    }
+
+    // 默认：层级视图
     const tree = this.plugin.dataManager.getProjectTree(null);
 
     if (tree.length === 0) {
@@ -1912,6 +2228,62 @@ class ProjectTreeView extends ItemView {
 
     for (const node of tree) {
       this.renderTreeNode(this.treeEl, node, 0);
+    }
+  }
+
+  // ── 情景分组视图 ──
+  _renderSitTree() {
+    const dm = this.plugin.dataManager;
+    const projects = dm.getProjects();
+    
+    if (projects.length === 0) {
+      this.treeEl.createEl('p', { text: '🌱 创建你的第一个项目吧', cls: 'tig-empty' });
+      return;
+    }
+
+    const situations = Object.keys(this.plugin.settings.situationColors || SITUATION_COLORS);
+    const sitMap = new Map();
+    for (const p of projects) {
+      const sit = p.situation || this.plugin.settings.defaultSituation || '默认';
+      if (!sitMap.has(sit)) sitMap.set(sit, []);
+      sitMap.get(sit).push(p);
+    }
+
+    const sortedSits = [...sitMap.keys()].sort((a, b) => {
+      const ia = situations.indexOf(a), ib = situations.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b, 'zh-CN');
+    });
+
+    for (const sit of sortedSits) {
+      const projs = sitMap.get(sit);
+      const sitTotal = projs.reduce((s, p) => s + dm.getProjectTotalMinutes(p.id), 0);
+      const color = this.plugin.settings.situationColors?.[sit] || SITUATION_COLORS[sit] || '#9E9E9E';
+      
+      const sitHeader = this.treeEl.createDiv('tig-scene-header');
+      const toggle = sitHeader.createSpan('tig-tree-toggle');
+      toggle.setText('▶');
+      const dot = sitHeader.createSpan('tig-color-dot');
+      dot.style.backgroundColor = color;
+      const label = sitHeader.createSpan('tig-scene-label');
+      label.setText(`${sit}（${projs.length}）`);
+      const sitDur = sitHeader.createSpan('tig-scene-dur');
+      sitDur.setText(fmtDuration(sitTotal));
+      
+      const sitBody = this.treeEl.createDiv('tig-scene-body');
+      sitBody.style.display = 'none';
+      
+      sitHeader.addEventListener('click', () => {
+        const hidden = sitBody.style.display === 'none';
+        sitBody.style.display = hidden ? 'block' : 'none';
+        toggle.setText(hidden ? '▼' : '▶');
+      });
+      
+      for (const p of projs) {
+        this.renderTreeNode(sitBody, { ...p, children: [], totalMinutes: dm.getProjectTotalMinutes(p.id) }, 0);
+      }
     }
   }
 

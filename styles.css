@@ -342,6 +342,113 @@
   border-color: var(--text-accent);
 }
 
+/* 快速记录 — 提示文字 */
+.tig-modal-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 4px 0 12px 0;
+}
+
+/* 快速记录 — 区块标签 */
+.tig-modal-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+/* 快速记录 — 分隔线 */
+.tig-modal-divider {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 快速记录 — 全部项目头部 */
+.tig-modal-all-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+/* 快速记录 — 项目列表 */
+.tig-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tig-modal-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.tig-modal-item:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-modal-item-name {
+  flex: 1;
+  font-size: 14px;
+}
+.tig-modal-item-dur {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+/* 快速记录 — 颜色圆点 */
+.tig-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 快速记录 — 全部项目可滚动区域 */
+.tig-modal-all-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+/* 快速记录 — 场景小标题 */
+.tig-modal-scene-header {
+  padding: 6px 4px 2px 4px;
+  margin-top: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tig-modal-scene-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* 快速记录 — 快捷区已有的项目在全部列表中加标记 */
+.tig-modal-item-recent {
+  opacity: 0.5;
+}
+.tig-modal-item-recent::after {
+  content: ' ⭐';
+  font-size: 10px;
+}
+
+/* 快速记录 — 输入行 */
+.tig-modal-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tig-modal-row input {
+  flex: 1;
+}
+
 /* ========== 设置页 ========== */
 .tig-setting-section {
   margin-bottom: 20px;
@@ -437,6 +544,44 @@
   font-size: 10px;
   color: var(--text-muted);
   min-width: 32px;
+}
+
+/* ========== 场景分组 ========== */
+.tig-mode-btns {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 8px;
+}
+.tig-mode-active {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
+}
+.tig-scene-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  margin: 4px 0;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.tig-scene-header:hover {
+  background: var(--background-modifier-hover);
+}
+.tig-scene-label {
+  flex: 1;
+}
+.tig-scene-dur {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tig-scene-body {
+  padding-left: 8px;
 }
 
 /* ========== 统计视图 ========== */
