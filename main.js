@@ -486,9 +486,9 @@ class QuickRecordModal extends Modal {
         const name = input.value.trim();
         if (!name) return;
         const project = await dm.addProject(name);
-        await dm.recordEntry(project.id);
-        new Notice(`🐾 已记录: ${name} — ${fmtDuration(dm.getTodayEntries().slice(-1)[0]?.duration || 0)}`);
-        if (this.onSubmit) this.onSubmit();
+        this.plugin.maybeRecord(project.id, () => {
+          if (this.onSubmit) this.onSubmit();
+        });
         this.close();
       });
       return;
@@ -507,10 +507,10 @@ class QuickRecordModal extends Modal {
       const total = dm.getProjectTotalMinutes(p.id);
       const durEl = row.createSpan({ text: fmtDuration(total), cls: 'tig-modal-item-dur' });
       
-      row.addEventListener('click', async () => {
-        const entry = await dm.recordEntry(p.id);
-        new Notice(`🐾 已记录: ${p.name} — ${fmtDuration(entry.duration)}`);
-        if (this.onSubmit) this.onSubmit();
+      row.addEventListener('click', () => {
+        this.plugin.maybeRecord(p.id, () => {
+          if (this.onSubmit) this.onSubmit();
+        });
         this.close();
       });
     }
@@ -648,7 +648,7 @@ class SplitRecordModal extends Modal {
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
       }
-      await dm.recordSplitEntries(entries, now.toISOString());
+      await dm.recordSplitEntries(entries, new Date().toISOString());
       this.close();
       if (this.onDone) this.onDone();
       const projectNames = [...new Set(entries.map(e => {
