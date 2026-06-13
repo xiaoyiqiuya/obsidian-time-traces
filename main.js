@@ -2180,11 +2180,16 @@ class TimeIsGoldMainView extends ItemView {
   }
 
   async _saveEntryEdit(entry) {
-    const all = this.plugin.data.entries || [];
+    const dm = this.plugin.dataManager;
+    const all = dm.data.entries || [];
     const idx = all.findIndex(e => e.id === entry.id);
-    if (idx !== -1) { all[idx] = entry; this.plugin.data.entries = all; }
+    if (idx !== -1) {
+      all[idx] = entry;
+      dm.data.entries = all;
+    }
     await this.plugin.saveData();
-    this.refreshTodayLog();
+    // 全量刷新：时间轴 + 日志列表 + 今日总计 + 脚步计时
+    this.renderPanel('timer');
   }
 
   async _deleteLogEntry(entry) {
@@ -2197,7 +2202,7 @@ class TimeIsGoldMainView extends ItemView {
       this.plugin.data.lastRecordTime = entries[entries.length - 1].endTime;
     }
     await this.plugin.saveData();
-    this.refreshTodayLog();
+    this.renderPanel('timer');
     new Notice('已删除');
   }
 }
