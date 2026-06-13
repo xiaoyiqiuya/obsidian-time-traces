@@ -627,15 +627,31 @@ class QuickRecordModal extends Modal {
   // ── 统一的记录动作 ──
   async _doRecord(projectId) {
     const dm = this.plugin.dataManager;
-    if (this.gapContext && this.gapContext.startTime && this.gapContext.endTime) {
-      await dm.recordGapEntry(projectId, this.gapContext.startTime, this.gapContext.endTime);
-      new Notice(`✅ ${dm.getProject(projectId)?.name || '项目'} — 时间段已分配`);
-    } else {
-      await dm.recordEntry(projectId);
-      new Notice(`🐾 ${dm.getProject(projectId)?.name || '项目'} — 已记录`);
+    const isGap = !!(this.gapContext && this.gapContext.startTime && this.gapContext.endTime);
+    try {
+      if (isGap) {
+        const entry = await dm.recordGapEntry(projectId, this.gapContext.startTime, this.gapContext.endTime);
+        if (!entry) {
+          new Notice('⚠️ 时间段无效，无法记录');
+          this.close();
+          return;
+        }
+        new Notice(`✅ ${dm.getProject(projectId)?.name || '项目'} — 时间段已分配`);
+      } else {
+        await dm.recordEntry(projectId);
+        new Notice(`🐾 ${dm.getProject(projectId)?.name || '项目'} — 已记录`);
+      }
+    } catch (e) {
+      console.error('时迹 _doRecord 错误:', e);
+      new Notice('❌ 记录失败: ' + (e.message || '未知错误'));
+      this.close();
+      return;
     }
-    if (this.onSubmit) this.onSubmit();
+    // 先关闭 modal，再触发回调刷新视图（避免 DOM 竞争）
     this.close();
+    if (this.onSubmit) {
+      try { this.onSubmit(); } catch (e) { console.error('时迹 onSubmit 错误:', e); }
+    }
   }
 
   // ── 渲染一个可点击的项目行 ──
