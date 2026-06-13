@@ -693,6 +693,7 @@ class SplitRecordModal extends Modal {
     del.addEventListener('click', () => {
       this.items = this.items.filter(i => i !== item);
       row.remove();
+      this._renderMainRow();
       this._refreshSummary();
     });
 
@@ -1556,8 +1557,8 @@ class TimeIsGoldMainView extends ItemView {
       durEl.setText(fmtDuration(entry.duration));
 
       // 点击条目 → 编辑/删
-      row.addEventListener('click', () => {
-        this._editLogEntry(entry);
+      row.addEventListener('click', (evt) => {
+        this._editLogEntry(entry, evt);
       });
 
       // 删除按钮
@@ -1575,7 +1576,7 @@ class TimeIsGoldMainView extends ItemView {
     totalRow.createSpan({ text: fmtDuration(totalDay), cls: 'tig-log-total-dur' });
   }
 
-  _editLogEntry(entry) {
+  _editLogEntry(entry, evt) {
     const dm = this.plugin.dataManager;
     const menu = new Menu();
     const projects = dm.getProjects();
@@ -1590,7 +1591,6 @@ class TimeIsGoldMainView extends ItemView {
         }));
     }
     menu.addSeparator();
-    // 时长调节 ±15min
     ['-15m', '+15m', '-30m', '+30m'].forEach(adj => {
       const delta = parseInt(adj);
       menu.addItem(item => item
@@ -1609,7 +1609,7 @@ class TimeIsGoldMainView extends ItemView {
     menu.addItem(item => item.setTitle('🗑️ 删除').setIcon('trash').onClick(async () => {
       await this._deleteLogEntry(entry);
     }));
-    menu.showAtPosition({ x: 100, y: 200 });
+    menu.showAtMouseEvent(evt);
   }
 
   async _deleteLogEntry(entry) {
