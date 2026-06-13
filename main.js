@@ -1800,62 +1800,65 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
   }
 
   async _buildFolderSetting(containerEl) {
-    const current = this.plugin.settings.dataFolder || '时迹数据';
-
-    // 自定义路径（置顶，手动输入深层路径）
-    new Setting(containerEl)
-      .setName('数据文件夹')
-      .setDesc('输入路径如「考研/自律」，数据文件将存为 考研/自律/time-is-gold.json')
-      .addText(text => text
-        .setPlaceholder('时迹数据')
-        .setValue(current)
-        .onChange(async (value) => {
-          const folder = value.trim();
-          if (!folder) return;
-          const old = this.plugin.settings.dataFolder;
-          this.plugin.settings.dataFolder = folder;
-          await this.plugin.saveSettings();
-          if (old !== folder) {
-            await this.plugin.loadSharedData();
-            this.plugin.refreshAllViews();
-            new Notice(`✅ 数据已迁移到「${folder}/」`);
-          }
-        }));
-
-    // 快捷选择：列出 Vault 现有文件夹
+    // 收集 Vault 内现有文件夹
     const folders = new Set(['时迹数据']);
     try {
-      const entries = await this.app.vault.adapter.list('/');
+      const vaultRoot = this.app.vault.adapter;
+      const entries = await vaultRoot.list('/');
       for (const e of entries) {
         const name = e.replace(/\/$/, '');
         if (name && !name.startsWith('.') && e.endsWith('/')) folders.add(name);
       }
     } catch(e) { /* 忽略 */ }
-    if (current && current !== '时迹数据') folders.add(current);
-    const sorted = [...folders].sort();
 
-    new Setting(containerEl)
-      .setName('快捷选择')
-      .setDesc('从已有文件夹中选一个')
+    // 加上当前值
+    const current = this.plugin.settings.dataFolder || '时迹数据';
+    folders.add(current);
+
+    const setting = new Setting(containerEl)
+      .setName('Vault 内文件夹')
+      .setDesc('选中即自动迁移数据。如选「考研」，则存为 考研/time-is-gold.json')
       .addDropdown(dropdown => {
-        dropdown.addOption('', '— 不更改 —');
+        const sorted = [...folders].sort();
         for (const f of sorted) {
           dropdown.addOption(f, f);
         }
-        dropdown.setValue('');
+        dropdown.addOption('__custom__', '📝 自定义...');
+        dropdown.setValue(sorted.includes(current) ? current : '__custom__');
+        
         dropdown.onChange(async (value) => {
-          if (!value) return;
+          if (value === '__custom__') { return; } // 自定义由下方文本处理
           const old = this.plugin.settings.dataFolder;
           this.plugin.settings.dataFolder = value;
           await this.plugin.saveSettings();
           if (old !== value) {
-            await this.plugin.loadSharedData();
+            await this.plugin.loadSharedData(); // 自动迁移
             this.plugin.refreshAllViews();
             new Notice(`✅ 数据已迁移到「${value}/」`);
           }
         });
         return dropdown;
       });
+
+    // 自定义路径文本输入
+    new Setting(containerEl)
+      .setName('自定义文件夹路径')
+      .setDesc('输入如「考研/自律记录」。下拉选「📝 自定义...」后生效')
+      .addText(text => text
+        .setPlaceholder('考研/自律')
+        .setValue(current === '__custom__' || ![...folders].includes(current) ? current : '')
+        .onChange(async (value) => {
+          const folder = value.trim();
+          if (!folder || folder === '__custom__') return;
+          const old = this.plugin.settings.dataFolder;
+          this.plugin.settings.dataFolder = folder;
+          await this.plugin.saveSettings();
+          if (old !== folder) {
+            await this.plugin.loadSharedData(); // 自动迁移
+            this.plugin.refreshAllViews();
+            new Notice(`✅ 数据已迁移到「${folder}/」`);
+          }
+        }));
 
     // 情境颜色设置
     containerEl.createEl('h3', { text: '🎨 情境颜色' });
