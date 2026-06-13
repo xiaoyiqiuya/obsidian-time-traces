@@ -638,8 +638,10 @@ class QuickRecordModal extends Modal {
         }
         new Notice(`✅ ${dm.getProject(projectId)?.name || '项目'} — 时间段已分配`);
       } else {
-        await dm.recordEntry(projectId);
-        new Notice(`🐾 ${dm.getProject(projectId)?.name || '项目'} — 已记录`);
+        // 使用 maybeRecord 保留长间隔分账逻辑
+        await new Promise(resolve => {
+          this.plugin.maybeRecord(projectId, resolve);
+        });
       }
     } catch (e) {
       console.error('时迹 _doRecord 错误:', e);
@@ -2073,7 +2075,7 @@ class TimeIsGoldMainView extends ItemView {
         .setTitle(p.name === (dm.getProject(entry.projectId)?.name || '') ? `  ✅ ${p.name}` : `  ${p.name}`)
         .onClick(async () => {
           entry.projectId = p.id;
-          this._saveEntryEdit(entry);
+          await this._saveEntryEdit(entry);
         }));
     }
     menu.addSeparator();
@@ -2084,7 +2086,7 @@ class TimeIsGoldMainView extends ItemView {
         .onClick(async () => {
           entry.duration = Math.max(15, (entry.duration || 0) + delta);
           entry.endTime = new Date(new Date(entry.startTime).getTime() + entry.duration * 60000).toISOString();
-          this._saveEntryEdit(entry);
+          await this._saveEntryEdit(entry);
         }));
     });
     menu.addSeparator();
@@ -2127,7 +2129,7 @@ class TimeIsGoldMainView extends ItemView {
 
     const btnRow = modal.contentEl.createDiv('tig-split-btns');
     const saveBtn = btnRow.createEl('button', { text: '保存', cls: 'tig-split-confirm' });
-    saveBtn.addEventListener('click', () => {
+    saveBtn.addEventListener('click', async () => {
       const s = new Date(startD); s.setHours(parseInt(sh.value)||0, parseInt(sm.value)||0, 0, 0);
       const e = new Date(endD); e.setHours(parseInt(eh.value)||0, parseInt(em.value)||0, 0, 0);
       const d = Math.round((e - s) / 60000);
@@ -2135,7 +2137,7 @@ class TimeIsGoldMainView extends ItemView {
       entry.startTime = s.toISOString();
       entry.endTime = e.toISOString();
       entry.duration = d;
-      this._saveEntryEdit(entry);
+      await this._saveEntryEdit(entry);
       modal.close();
     });
     const cancelBtn = btnRow.createEl('button', { text: '取消', cls: 'tig-split-skip' });
@@ -2144,11 +2146,11 @@ class TimeIsGoldMainView extends ItemView {
     modal.open();
   }
 
-  _saveEntryEdit(entry) {
+  async _saveEntryEdit(entry) {
     const all = this.plugin.data.entries || [];
     const idx = all.findIndex(e => e.id === entry.id);
     if (idx !== -1) { all[idx] = entry; this.plugin.data.entries = all; }
-    this.plugin.saveData();
+    await this.plugin.saveData();
     this.refreshTodayLog();
   }
 
