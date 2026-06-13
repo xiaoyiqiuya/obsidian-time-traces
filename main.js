@@ -162,16 +162,25 @@ class DataManager {
     return Math.min(100, Math.round((totalMin / goalMin) * 100));
   }
 
-  hasProjectNamed(name, parentId = null) {
-    return (this.data.projects || []).some(p => 
-      p.name === name && p.parentId === parentId && !p.archived
-    );
+  findProjectByName(name) {
+    return (this.data.projects || []).filter(p => 
+      p.name === name && !p.archived
+    ).map(p => ({
+      ...p,
+      parentPath: this._getProjectPath(p.parentId)
+    }));
+  }
+
+  _getProjectPath(pid) {
+    if (!pid) return '';
+    const p = this.getProject(pid);
+    if (!p) return '';
+    const parentPath = this._getProjectPath(p.parentId);
+    return parentPath ? `${parentPath} > ${p.name}` : p.name;
   }
 
   async addProject(name, parentId = null, color = null, situation = null) {
     const projects = this.data.projects || [];
-    // 同名警告（仍允许创建，调用方负责提示）
-    const isDuplicate = this.hasProjectNamed(name, parentId);
     const project = {
       id: uid(),
       name,
@@ -835,10 +844,13 @@ class ProjectEditModal extends Modal {
           note: noteInput.value.trim()
         });
       } else {
-        if (this.plugin.dataManager.hasProjectNamed(name)) {
-          new Notice(`⚠️ 已存在同名项目「${name}」`);
+        const dm = this.plugin.dataManager;
+        const existing = dm.findProjectByName(name);
+        if (existing.length > 0) {
+          const locations = existing.map(e => e.parentPath || '根目录').join('、');
+          if (!confirm(`已有同名项目「${name}」在「${locations}」。确定重复添加？`)) return;
         }
-        await this.plugin.dataManager.addProject(name, null, color, situation);
+        await dm.addProject(name, null, color, situation);
       }
       
       new Notice(this.project ? '项目已更新' : `✅ 项目「${name}」已创建`);
@@ -1381,13 +1393,19 @@ class TimeIsGoldMainView extends ItemView {
     this.quickListEl = section.createDiv('tig-quick-list');
     this.refreshQuickList();
 
-    // 新项目
+    // 新项目（名称 + 情境）
     const newRow = section.createDiv('tig-new-row');
     const input = newRow.createEl('input', {
       type: 'text',
-      placeholder: '新建项目...',
+      placeholder: '项目名称',
       cls: 'tig-input'
     });
+    const sitSelect = newRow.createEl('select', { cls: 'tig-input' });
+    sitSelect.style.maxWidth = '80px';
+    const situations = Object.keys(this.plugin.settings.situationColors || SITUATION_COLORS);
+    situations.forEach(s => { const opt = sitSelect.createEl('option', { text: s }); opt.value = s; });
+    sitSelect.value = this.plugin.settings.defaultSituation || '默认';
+
     const addBtn = newRow.createEl('button', {
       text: '+',
       cls: 'tig-btn tig-btn-sm'
@@ -1397,10 +1415,14 @@ class TimeIsGoldMainView extends ItemView {
       const name = input.value.trim();
       if (!name) return;
       const dm = this.plugin.dataManager;
-      if (dm.hasProjectNamed(name)) {
-        new Notice(`⚠️ 已存在同名项目「${name}」，仍已创建`);
+      const existing = dm.findProjectByName(name);
+      if (existing.length > 0) {
+        const locations = existing.map(e => e.parentPath || '根目录').join('、');
+        if (!confirm(`已有同名项目「${name}」在「${locations}」。确定重复添加？`)) return;
       }
-      await dm.addProject(name);
+      const situation = sitSelect.value;
+      const color = this.plugin.settings.situationColors[situation] || '#9E9E9E';
+      await dm.addProject(name, null, color, situation);
       input.value = '';
       this.refreshQuickList();
       new Notice(`✅ 项目「${name}」已创建`);
