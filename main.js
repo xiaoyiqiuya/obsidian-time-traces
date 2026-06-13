@@ -377,7 +377,7 @@ class DataManager {
 
   // ── 分账写入 ──
 
-  async recordSplitEntries(splitEntries, lastRecordTime) {
+  async recordSplitEntries(splitEntries) {
     const entries = this.data.entries || [];
     let prevEnd = this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : new Date(Date.now() - 3600000);
 
@@ -398,7 +398,7 @@ class DataManager {
     }
 
     this.data.entries = entries;
-    this.data.lastRecordTime = lastRecordTime || prevEnd.toISOString();
+    this.data.lastRecordTime = prevEnd.toISOString(); // 始终用最后一条的结束时间
     await this.plugin.saveData();
     return entries.slice(-splitEntries.length);
   }
@@ -648,7 +648,7 @@ class SplitRecordModal extends Modal {
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
       }
-      await dm.recordSplitEntries(entries, new Date().toISOString());
+      await dm.recordSplitEntries(entries);
       this.close();
       if (this.onDone) this.onDone();
       const projectNames = [...new Set(entries.map(e => {
