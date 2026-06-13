@@ -784,6 +784,18 @@
 }
 .tig-split-move-btn:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
 .tig-split-move-disabled { opacity: 0.25; pointer-events: none; }
+/* 拖拽排序 */
+.tig-split-draggable { transition: transform 0.15s; }
+.tig-split-dragging {
+  opacity: 0.92; transform: scale(1.03);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  border-radius: 6px;
+}
+.tig-split-drag-source { opacity: 0.3; }
+.tig-split-drop-target {
+  border-top: 2px dashed var(--interactive-accent) !important;
+  margin-top: -2px;
+}
 .tig-split-add-row { margin: 8px 0; }
 .tig-split-add-btn {
   padding: 6px 14px; border: 1px dashed var(--background-modifier-border);
