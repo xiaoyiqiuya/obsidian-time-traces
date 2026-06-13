@@ -823,8 +823,7 @@ class SplitRecordModal extends Modal {
 
   get totalGap() { return this.gapInfo.gapMinutes; }
   get allocatedMin() {
-    const itemSum = this.items.reduce((s, i) => s + i.duration, 0);
-    return itemSum + (this._mainItem ? this._mainItem.duration : 0);
+    return this.items.reduce((s, i) => s + i.duration, 0);
   }
 
   onOpen() {
@@ -852,8 +851,10 @@ class SplitRecordModal extends Modal {
       this._addItem(r.projectId, r.name, r.color, r.duration, r.slotHour);
     }
 
-    // 主项目（自动吸收剩余时间）
-    this._mainItem = { projectId: this.mainProjectId, name: mainProject?.name || '项目', color: mainProject?.color || '#9E9E9E', duration: this.totalGap, isMain: true };
+    // 主项目也加入 items（排最后，isMain 标记，自动吸收剩余时间）
+    this._addItem(this.mainProjectId, mainProject?.name || '项目', mainProject?.color || '#9E9E9E', this.totalGap, new Date().getHours());
+    const mainItem = this.items.find(i => i.projectId === this.mainProjectId);
+    if (mainItem) mainItem.isMain = true;
     this._renderAll();
 
     // ⬜ 空白（遗忘时间）
@@ -862,7 +863,8 @@ class SplitRecordModal extends Modal {
     blankBtn.addEventListener('click', () => {
       const gap = this.totalGap - this.allocatedMin;
       if (gap > 0) {
-        this._mainItem.duration = gap;
+        const mainItem = this.items.find(i => i.isMain);
+        if (mainItem) mainItem.duration = gap;
         this._renderAll();
         new Notice(`⬜ 剩余 ${fmtDuration(gap)} 已标为空白`);
       }
@@ -933,11 +935,7 @@ class SplitRecordModal extends Modal {
     });
     this.confirmBtn.addEventListener('click', async () => {
       if (this.allocatedMin > this.totalGap) return;
-      const entries = [...this.items];
-      // 主项目（含用户调过的时长）
-      if (this._mainItem && this._mainItem.duration > 0) {
-        entries.push({ projectId: this._mainItem.projectId, duration: this._mainItem.duration, note: '' });
-      }
+      const entries = this.items.map(i => ({ projectId: i.projectId, duration: i.duration, note: '' }));
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
       }
@@ -965,15 +963,16 @@ class SplitRecordModal extends Modal {
     if (!this.itemsEl) return;
     this.itemsEl.empty();
 
-    const mi = this._mainItem;
-    const otherSum = this.items.reduce((s, i) => s + i.duration, 0);
-    mi.duration = Math.max(0, this.totalGap - otherSum);
-
-    for (let idx = 0; idx < this.items.length; idx++) {
-      this._renderRow(this.itemsEl, this.items[idx], idx, this.items.length);
+    // 主项目自动吸收剩余时间
+    const mainItem = this.items.find(i => i.isMain);
+    if (mainItem) {
+      const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
+      mainItem.duration = Math.max(0, this.totalGap - otherSum);
     }
-    if (mi.duration > 0 || this.items.length === 0) {
-      this._renderRow(this.itemsEl, mi, -1, this.items.length);
+
+    const totalRows = this.items.length;
+    for (let idx = 0; idx < this.items.length; idx++) {
+      this._renderRow(this.itemsEl, this.items[idx], idx, totalRows);
     }
     this._renderSummary();
   }
