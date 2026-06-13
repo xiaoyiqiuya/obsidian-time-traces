@@ -819,7 +819,6 @@ class SplitRecordModal extends Modal {
     this.onDone = onDone;
     this.items = []; // { projectId, name, color, duration, slotHour }
     this.defaultStep = 15; // 15 分钟步进
-    this.recSortMode = 'score'; // 'score' | 'time' —— 智能推荐排序
   }
 
   get totalGap() { return this.gapInfo.gapMinutes; }
@@ -844,39 +843,14 @@ class SplitRecordModal extends Modal {
     });
 
     // 智能推荐
-    const allRecs = dm.getSmartRecommendations(this.totalGap).filter(r => r.projectId !== this.mainProjectId);
-    if (allRecs.length > 0) {
-      const recHeader = contentEl.createDiv('tig-split-rec-header');
-      recHeader.createSpan({ text: '💡 智能推荐', cls: 'tig-split-label' });
-      // 排序切换
-      const sortBtns = recHeader.createDiv('tig-mode-btns');
-      const scoreBtn = sortBtns.createEl('button', { text: '⭐', cls: 'tig-btn tig-btn-sm tig-mode-active', attr: { title: '按推荐度' } });
-      const timeBtn = sortBtns.createEl('button', { text: '🕐', cls: 'tig-btn tig-btn-sm', attr: { title: '按时段排序' } });
-      const recIds = new Set(allRecs.map(r => r.projectId));
-      const renderRecs = () => {
-        const userItems = this.items.filter(i => !recIds.has(i.projectId));
-        this.recsEl.empty();
-        const sorted = [...allRecs].sort((a, b) => {
-          if (this.recSortMode === 'time') return (a.slotHour || 0) - (b.slotHour || 0);
-          return 0;
-        });
-        for (const r of sorted) {
-          this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration, r.slotHour);
-        }
-        for (const ui of userItems) {
-          this._addItemRow(this.recsEl, ui.projectId, ui.name, ui.color, ui.duration, ui.slotHour);
-        }
-      };
-      scoreBtn.addEventListener('click', () => {
-        this.recSortMode = 'score'; scoreBtn.addClass('tig-mode-active'); timeBtn.removeClass('tig-mode-active');
-        renderRecs();
-      });
-      timeBtn.addEventListener('click', () => {
-        this.recSortMode = 'time'; timeBtn.addClass('tig-mode-active'); scoreBtn.removeClass('tig-mode-active');
-        renderRecs();
-      });
+    const recs = dm.getSmartRecommendations(this.totalGap);
+    if (recs.length > 0) {
+      contentEl.createEl('p', { text: '💡 智能推荐', cls: 'tig-split-label' });
       this.recsEl = contentEl.createDiv('tig-split-recs');
-      renderRecs();
+      for (const r of recs) {
+        if (r.projectId === this.mainProjectId) continue;
+        this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration, r.slotHour);
+      }
     }
 
     // 主项目（可调时长，剩余自动归此然后变为未记录）

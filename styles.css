@@ -737,11 +737,6 @@
   color: var(--text-muted);
   margin: 8px 0 6px;
 }
-.tig-split-rec-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 .tig-split-recs {
   display: flex;
   flex-direction: column;
