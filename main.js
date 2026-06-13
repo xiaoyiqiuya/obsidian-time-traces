@@ -819,6 +819,7 @@ class SplitRecordModal extends Modal {
     this.onDone = onDone;
     this.items = []; // { projectId, name, color, duration, slotHour }
     this.defaultStep = 15; // 15 分钟步进
+    this.recSortMode = 'score'; // 'score' | 'time' —— 智能推荐排序
   }
 
   get totalGap() { return this.gapInfo.gapMinutes; }
@@ -842,27 +843,57 @@ class SplitRecordModal extends Modal {
       text: `📋 距上次记录 ${fmtDuration(this.totalGap)}（${fmtTime(lastTime.toISOString())} → ${fmtTime(now.toISOString())}）`
     });
 
-    // ── 统一项目列表（按时段排列，主项目 + 智能推荐 + 手动添加）──
-    this.itemsEl = contentEl.createDiv('tig-split-items');
-
-    // 智能推荐：自动加入
-    const recs = dm.getSmartRecommendations(this.totalGap).filter(r => r.projectId !== this.mainProjectId);
-    for (const r of recs) {
-      this._addItem(r.projectId, r.name, r.color, r.duration, r.slotHour);
+    // 智能推荐
+    const allRecs = dm.getSmartRecommendations(this.totalGap).filter(r => r.projectId !== this.mainProjectId);
+    if (allRecs.length > 0) {
+      const recHeader = contentEl.createDiv('tig-split-rec-header');
+      recHeader.createSpan({ text: '💡 智能推荐', cls: 'tig-split-label' });
+      // 排序切换
+      const sortBtns = recHeader.createDiv('tig-mode-btns');
+      const scoreBtn = sortBtns.createEl('button', { text: '⭐', cls: 'tig-btn tig-btn-sm tig-mode-active', attr: { title: '按推荐度' } });
+      const timeBtn = sortBtns.createEl('button', { text: '🕐', cls: 'tig-btn tig-btn-sm', attr: { title: '按时段排序' } });
+      const recIds = new Set(allRecs.map(r => r.projectId));
+      const renderRecs = () => {
+        const userItems = this.items.filter(i => !recIds.has(i.projectId));
+        this.recsEl.empty();
+        const sorted = [...allRecs].sort((a, b) => {
+          if (this.recSortMode === 'time') return (a.slotHour || 0) - (b.slotHour || 0);
+          return 0;
+        });
+        for (const r of sorted) {
+          this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration, r.slotHour);
+        }
+        for (const ui of userItems) {
+          this._addItemRow(this.recsEl, ui.projectId, ui.name, ui.color, ui.duration, ui.slotHour);
+        }
+      };
+      scoreBtn.addEventListener('click', () => {
+        this.recSortMode = 'score'; scoreBtn.addClass('tig-mode-active'); timeBtn.removeClass('tig-mode-active');
+        renderRecs();
+      });
+      timeBtn.addEventListener('click', () => {
+        this.recSortMode = 'time'; timeBtn.addClass('tig-mode-active'); scoreBtn.removeClass('tig-mode-active');
+        renderRecs();
+      });
+      this.recsEl = contentEl.createDiv('tig-split-recs');
+      renderRecs();
     }
 
-    // 主项目（自动吸收剩余时间）
-    this._mainItem = { projectId: this.mainProjectId, name: mainProject?.name || '项目', color: mainProject?.color || '#9E9E9E', duration: this.totalGap, slotHour: new Date().getHours() };
-    this._renderAll();
+    // 主项目（可调时长，剩余自动归此然后变为未记录）
+    contentEl.createEl('p', { text: '📌 主项目', cls: 'tig-split-label' });
+    this.mainEl = contentEl.createDiv('tig-split-recs');
+    this._mainItem = { projectId: this.mainProjectId, name: mainProject?.name || '项目', color: mainProject?.color || '#9E9E9E', duration: this.totalGap };
+    this._renderMainRow();
 
-    // ⬜ 空白
+    // ⬜ 空白（遗忘时间，置底）
     const blankRow = contentEl.createDiv('tig-split-add-row');
     const blankBtn = blankRow.createEl('button', { text: '⬜ 遗忘/空白时间', cls: 'tig-split-add-btn' });
     blankBtn.addEventListener('click', () => {
       const gap = this.totalGap - this.allocatedMin;
       if (gap > 0) {
         this._mainItem.duration = gap;
-        this._renderAll();
+        this._renderMainRow();
+        this._refreshSummary();
         new Notice(`⬜ 剩余 ${fmtDuration(gap)} 已标为空白`);
       }
     });
@@ -880,8 +911,8 @@ class SplitRecordModal extends Modal {
         .onClick(() => {
           new ProjectEditModal(this.app, this.plugin, null, (newProject) => {
             if (newProject) {
-              this._addItem(newProject.id, newProject.name, newProject.color || '#9E9E9E', 60, new Date().getHours());
-              this._renderAll();
+              this._addItemRow(this.recsEl || contentEl, newProject.id, newProject.name, newProject.color || '#9E9E9E', 60);
+              this._refreshSummary();
             }
           }).open();
         }));
@@ -896,8 +927,8 @@ class SplitRecordModal extends Modal {
           m.addItem(item => item
             .setTitle(prefix + node.name)
             .onClick(() => {
-              this._addItem(node.id, node.name, node.color || '#9E9E9E', 60, new Date().getHours());
-              this._renderAll();
+              this._addItemRow(this.recsEl || contentEl, node.id, node.name, node.color || '#9E9E9E', 60);
+              this._refreshSummary();
             }));
           if (node.children && node.children.length > 0) {
             buildMenu(node.children, m, depth + 1);
@@ -950,68 +981,88 @@ class SplitRecordModal extends Modal {
       new Notice(`✅ 已分账: ${projectNames}`);
     });
 
-    this._renderAll();
+    this._refreshSummary();
   }
 
-  // ── 添加项目到列表（不渲染 DOM，只存数据）──
-  _addItem(projectId, name, color, duration, slotHour) {
+  _addItemRow(parentEl, projectId, name, color, duration, slotHour) {
     const existing = this.items.find(i => i.projectId === projectId);
-    if (existing) { existing.duration += duration; return; }
+    if (existing) { existing.duration += duration; this._refreshAll(); return; }
+
     const item = { projectId, name, color, duration: Math.min(duration, this.totalGap), slotHour: slotHour || new Date().getHours() };
     this.items.push(item);
+    // 按时间重新排序
     this.items.sort((a, b) => (a.slotHour || 0) - (b.slotHour || 0));
+
+    const row = parentEl.createDiv('tig-split-item');
+    row._item = item;
+
+    const dot = row.createSpan('tig-split-dot');
+    dot.style.backgroundColor = color;
+
+    row.createSpan({ text: name, cls: 'tig-split-name' });
+
+    const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
+    const durEl = row.createSpan({ text: fmtDuration(item.duration), cls: 'tig-split-dur' });
+    const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
+    const del = row.createEl('button', { text: '✕', cls: 'tig-split-del' });
+
+    const update = () => {
+      item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap));
+      durEl.setText(fmtDuration(item.duration));
+      this._renderMainRow();
+      this._refreshSummary();
+    };
+
+    minus.addEventListener('click', () => { item.duration -= this.defaultStep; update(); });
+    plus.addEventListener('click', () => { item.duration += this.defaultStep; update(); });
+    del.addEventListener('click', () => {
+      this.items = this.items.filter(i => i !== item);
+      row.remove();
+      this._renderMainRow();
+      this._refreshSummary();
+    });
+
+    update();
   }
 
-  // ── 全量渲染：按时段排列所有项目 + 主项目 + 汇总 ──
-  _renderAll() {
-    if (!this.itemsEl) return;
-    this.itemsEl.empty();
-
+  _renderMainRow() {
+    if (!this.mainEl) return;
+    this.mainEl.empty();
     const mi = this._mainItem;
     // 主项目时长 = 总时长 - 其他项已分配
     const otherSum = this.items.reduce((s, i) => s + i.duration, 0);
     mi.duration = Math.max(0, this.totalGap - otherSum);
 
-    // 合并所有行：items + 主项目，按时段排序
-    const allRows = [...this.items.map(i => ({ ...i, isMain: false }))];
-    if (mi.duration > 0 || allRows.length === 0) {
-      allRows.push({ ...mi, isMain: true });
-    }
-    allRows.sort((a, b) => (a.slotHour || 0) - (b.slotHour || 0));
+    const row = this.mainEl.createDiv('tig-split-item');
+    const dot = row.createSpan('tig-split-dot');
+    dot.style.backgroundColor = mi.color;
+    row.createSpan({ text: mi.name, cls: 'tig-split-name' });
+    const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
+    const durEl = row.createSpan({ text: fmtDuration(mi.duration), cls: 'tig-split-dur' });
+    const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
 
-    for (const item of allRows) {
-      const row = this.itemsEl.createDiv('tig-split-item');
-      if (item.isMain) row.addClass('tig-split-main');
-
-      const dot = row.createSpan('tig-split-dot');
-      dot.style.backgroundColor = item.color;
-      row.createSpan({ text: item.isMain ? `⭐ ${item.name}` : item.name, cls: 'tig-split-name' });
-
-      const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
-      const durEl = row.createSpan({ text: fmtDuration(item.duration), cls: 'tig-split-dur' });
-      const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
-      if (!item.isMain) {
-        const del = row.createEl('button', { text: '✕', cls: 'tig-split-del' });
-        del.addEventListener('click', () => {
-          this.items = this.items.filter(i => i.projectId !== item.projectId);
-          this._renderAll();
-        });
-      }
-
-      const update = () => {
-        item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap));
-        durEl.setText(fmtDuration(item.duration));
-        this._renderAll();
-      };
-      minus.addEventListener('click', () => { item.duration -= this.defaultStep; update(); });
-      plus.addEventListener('click', () => { item.duration += this.defaultStep; update(); });
-    }
-
-    // 汇总
-    this._renderSummary();
+    const update = () => {
+      // 手动调主项目：允许 ≥0，但不能让总和超 totalGap
+      mi.duration = Math.max(0, Math.min(mi.duration, this.totalGap - otherSum));
+      durEl.setText(fmtDuration(mi.duration));
+      this._refreshSummary();
+    };
+    minus.addEventListener('click', () => { 
+      const surplus = otherSum + mi.duration - this.totalGap;
+      mi.duration -= (surplus > 0 ? this.defaultStep : this.defaultStep); 
+      update(); 
+    });
+    plus.addEventListener('click', () => { mi.duration += this.defaultStep; update(); });
+    update();
   }
 
-  _renderSummary() {
+  _refreshAll() {
+    this.contentEl.empty();
+    this.items = [];
+    this.onOpen();
+  }
+
+  _refreshSummary() {
     if (!this.summaryEl) return;
     this.summaryEl.empty();
     const allocated = this.allocatedMin;
