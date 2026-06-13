@@ -629,6 +629,7 @@ class QuickRecordModal extends Modal {
     const dm = this.plugin.dataManager;
     if (this.gapContext && this.gapContext.startTime && this.gapContext.endTime) {
       await dm.recordGapEntry(projectId, this.gapContext.startTime, this.gapContext.endTime);
+      new Notice(`✅ ${dm.getProject(projectId)?.name || '项目'} — 时间段已分配`);
     } else {
       await dm.recordEntry(projectId);
       new Notice(`🐾 ${dm.getProject(projectId)?.name || '项目'} — 已记录`);
@@ -1989,8 +1990,8 @@ class TimeIsGoldMainView extends ItemView {
               gapMin: Math.round(gapMin)
             };
             new QuickRecordModal(this.app, this.plugin, () => {
-              this.refreshTodayLog();
-              new Notice('✅ 时间段已分配');
+              // 间隙填补后全量刷新计时面板（比 refreshTodayLog 更稳健）
+              this.renderPanel('timer');
             }, gapCtx).open();
           });
           const gapTitle = document.createElementNS(NS, 'title');
