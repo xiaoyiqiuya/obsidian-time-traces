@@ -1801,11 +1801,10 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
 
   async _buildFolderSetting(containerEl) {
     const current = this.plugin.settings.dataFolder || '时迹数据';
-    let pendingFolder = current;
 
-    const migrate = async (folder) => {
+    const doSave = async (folder) => {
       folder = folder.trim();
-      if (!folder || folder === current) return;
+      if (!folder || folder === this.plugin.settings.dataFolder) return;
       const old = this.plugin.settings.dataFolder;
       this.plugin.settings.dataFolder = folder;
       await this.plugin.saveSettings();
@@ -1816,64 +1815,47 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
       }
     };
 
-    // 自定义路径（置顶，支持深层路径如「考研/自律」）
-    const pathSetting = new Setting(containerEl)
-      .setName('数据文件夹')
-      .setDesc('输入后按回车或点保存生效')
-      .addText(text => {
-        text.setPlaceholder('时迹数据').setValue(current);
-        text.inputEl.addEventListener('keydown', async (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); await migrate(text.inputEl.value); }
-        });
-        text.inputEl.addEventListener('blur', async () => {
-          await migrate(text.inputEl.value);
-        });
-        return text;
-      });
-
-    // 保存按钮
-    pathSetting.addButton(btn => btn
-      .setButtonText('保存')
-      .setCta()
-      .onClick(async () => {
-        const input = pathSetting.controlEl.querySelector('input');
-        if (input) await migrate(input.value);
-      }));
-
     // 收集 Vault 一级文件夹
     const topFolders = new Set(['时迹数据']);
     try {
       const result = await this.app.vault.adapter.list('/');
-      const allFolders = result.folders || [];
-      for (const name of allFolders) {
+      for (const name of (result.folders || [])) {
         const clean = name.replace(/\/$/, '');
         if (clean && !clean.startsWith('.')) topFolders.add(clean);
       }
     } catch(e) { /* 忽略 */ }
     if (current && !current.includes('/')) topFolders.add(current);
-
-    // 快捷选择
     const sorted = [...topFolders].sort();
-    const isTopLevel = current && !current.includes('/') && topFolders.has(current);
 
-    new Setting(containerEl)
-      .setName('快捷选择')
-      .setDesc('从 Vault 一级文件夹中选一个')
+    // 合并控件：文本输入 + 下拉填充 + 保存按钮
+    const setting = new Setting(containerEl)
+      .setName('数据文件夹')
+      .setDesc('输入路径（支持考研/自律），或从下拉选一级文件夹填充')
+      .addText(text => {
+        text.setPlaceholder('时迹数据').setValue(current);
+        text.inputEl.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); doSave(text.inputEl.value); }
+        });
+        return text;
+      })
       .addDropdown(dropdown => {
-        if (!isTopLevel) dropdown.addOption('', '— 当前为深层路径 —');
-        for (const f of sorted) {
-          dropdown.addOption(f, f);
-        }
-        dropdown.setValue(isTopLevel ? current : '');
-        dropdown.onChange(async (value) => {
+        dropdown.addOption('', '— 选文件夹填充 —');
+        for (const f of sorted) dropdown.addOption(f, f);
+        dropdown.setValue('');
+        dropdown.onChange((value) => {
           if (!value) return;
-          await migrate(value);
-          // 同步文本输入框
-          const input = pathSetting.controlEl.querySelector('input');
-          if (input) input.value = value;
+          const input = setting.controlEl.querySelector('input');
+          if (input) { input.value = value; input.focus(); }
         });
         return dropdown;
-      });
+      })
+      .addButton(btn => btn
+        .setButtonText('保存')
+        .setCta()
+        .onClick(() => {
+          const input = setting.controlEl.querySelector('input');
+          if (input) doSave(input.value);
+        }));
 
     // 情境颜色设置
     containerEl.createEl('h3', { text: '🎨 情境颜色' });
