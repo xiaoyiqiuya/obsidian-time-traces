@@ -999,8 +999,37 @@ class SplitRecordModal extends Modal {
     row.createSpan({ text: item.isMain ? `⭐ ${item.name}` : item.name, cls: 'tig-split-name' });
 
     const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
-    const durEl = row.createSpan({ text: fmtDuration(item.duration), cls: 'tig-split-dur' });
+    const durEl = row.createEl('span', { text: fmtDuration(item.duration), cls: 'tig-split-dur', attr: { title: '点击输入分钟数' } });
+    durEl.style.cursor = 'pointer';
     const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
+
+    // 点击时长 → 输入框直接改分钟数
+    durEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = String(this.defaultStep);
+      input.max = String(this.totalGap);
+      input.value = String(item.duration);
+      input.style.cssText = 'width:58px;text-align:center;font-family:var(--font-monospace);font-size:13px;padding:2px 4px;border:1px solid var(--interactive-accent);border-radius:4px;background:var(--background-primary)';
+      durEl.replaceWith(input);
+      input.focus(); input.select();
+
+      const apply = () => {
+        const v = parseInt(input.value) || item.duration;
+        item.duration = Math.max(this.defaultStep, Math.min(v, this.totalGap));
+        if (item.isMain) {
+          this._mainManuallySet = true;
+          this._renderSummary();
+          this._renderAll(); // 刷新 durEl 显示
+        } else {
+          this._mainManuallySet = false;
+          this._renderAll();
+        }
+      };
+      input.addEventListener('blur', apply);
+      input.addEventListener('keydown', (ke) => { if (ke.key === 'Enter') { ke.preventDefault(); apply(); } });
+    });
 
     if (!item.isMain) {
       const del = row.createEl('button', { text: '✕', cls: 'tig-split-del' });
