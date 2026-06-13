@@ -957,15 +957,16 @@ class SplitRecordModal extends Modal {
     if (existing) { existing.duration += duration; return; }
     const item = { projectId, name, color, duration: Math.min(duration, this.totalGap), slotHour: slotHour || new Date().getHours() };
     this.items.push(item);
+    this._mainManuallySet = false;
   }
 
   _renderAll() {
     if (!this.itemsEl) return;
     this.itemsEl.empty();
 
-    // 主项目自动吸收剩余时间
+    // 主项目自动吸收剩余时间（除非用户手动调过）
     const mainItem = this.items.find(i => i.isMain);
-    if (mainItem) {
+    if (mainItem && !this._mainManuallySet) {
       const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
       mainItem.duration = Math.max(0, this.totalGap - otherSum);
     }
@@ -1005,11 +1006,22 @@ class SplitRecordModal extends Modal {
       const del = row.createEl('button', { text: '✕', cls: 'tig-split-del' });
       del.addEventListener('click', () => {
         this.items = this.items.filter(i => i.projectId !== item.projectId);
+        this._mainManuallySet = false;
         this._renderAll();
       });
     }
 
-    const update = () => { item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap)); durEl.setText(fmtDuration(item.duration)); this._renderAll(); };
+    const update = () => {
+      item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap));
+      durEl.setText(fmtDuration(item.duration));
+      if (item.isMain) {
+        this._mainManuallySet = true;
+        this._renderSummary();
+      } else {
+        this._mainManuallySet = false;
+        this._renderAll();
+      }
+    };
     minus.addEventListener('click', () => { item.duration -= this.defaultStep; update(); });
     plus.addEventListener('click', () => { item.duration += this.defaultStep; update(); });
 
@@ -1105,10 +1117,12 @@ class SplitRecordModal extends Modal {
       rowB.style.transform = `translateY(${dir > 0 ? -h : h}px)`;
       setTimeout(() => {
         [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
+        this._mainManuallySet = false;
         this._renderAll();
       }, 180);
     } else {
       [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
+      this._mainManuallySet = false;
       this._renderAll();
     }
   }
