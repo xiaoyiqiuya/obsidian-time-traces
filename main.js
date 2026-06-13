@@ -574,22 +574,29 @@ class DataManager {
 
   getTodayEntries() {
     const t = today();
-    return (this.data.entries || []).filter(e => fmtDate(e.endTime) === t);
+    return (this.data.entries || [])
+      .filter(e => e.startTime && fmtDate(e.endTime) === t)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   }
 
   getEntriesByDate(date) {
-    return (this.data.entries || []).filter(e => fmtDate(e.endTime) === date);
+    return (this.data.entries || [])
+      .filter(e => e.startTime && fmtDate(e.endTime) === date)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   }
 
   getAllEntriesSorted() {
-    return [...(this.data.entries || [])].sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
+    return [...(this.data.entries || [])]
+      .filter(e => e.startTime)
+      .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
   }
 
   // 统计用（排除空白）
   getEntriesForStats(dateSince) {
     return (this.data.entries || [])
-      .filter(e => e.projectId !== '__blank__')
-      .filter(e => !dateSince || fmtDate(e.endTime) >= dateSince);
+      .filter(e => e.startTime && e.projectId !== '__blank__')
+      .filter(e => !dateSince || fmtDate(e.endTime) >= dateSince)
+      .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   }
 
   getLastRecordTime() {
