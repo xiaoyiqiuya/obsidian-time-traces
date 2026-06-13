@@ -576,7 +576,7 @@ class SplitRecordModal extends Modal {
     this.gapInfo = gapInfo;
     this.mainProjectId = mainProjectId;
     this.onDone = onDone;
-    this.items = []; // { projectId, name, color, duration }
+    this.items = []; // { projectId, name, color, duration, slotHour }
     this.defaultStep = 15; // 15 分钟步进
   }
 
@@ -608,7 +608,7 @@ class SplitRecordModal extends Modal {
       this.recsEl = contentEl.createDiv('tig-split-recs');
       for (const r of recs) {
         if (r.projectId === this.mainProjectId) continue;
-        this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration);
+        this._addItemRow(this.recsEl, r.projectId, r.name, r.color, r.duration, r.slotHour);
       }
     }
 
@@ -617,6 +617,19 @@ class SplitRecordModal extends Modal {
     this.mainEl = contentEl.createDiv('tig-split-recs');
     this._mainItem = { projectId: this.mainProjectId, name: mainProject?.name || '项目', color: mainProject?.color || '#9E9E9E', duration: this.totalGap };
     this._renderMainRow();
+
+    // ⬜ 空白（遗忘时间，置底）
+    const blankRow = contentEl.createDiv('tig-split-add-row');
+    const blankBtn = blankRow.createEl('button', { text: '⬜ 遗忘/空白时间', cls: 'tig-split-add-btn' });
+    blankBtn.addEventListener('click', () => {
+      const gap = this.totalGap - this.allocatedMin;
+      if (gap > 0) {
+        this._mainItem.duration = gap;
+        this._renderMainRow();
+        this._refreshSummary();
+        new Notice(`⬜ 剩余 ${fmtDuration(gap)} 已标为空白`);
+      }
+    });
 
     // 添加按钮（树形菜单 + 新建）
     const addRow = contentEl.createDiv('tig-split-add-row');
@@ -704,12 +717,14 @@ class SplitRecordModal extends Modal {
     this._refreshSummary();
   }
 
-  _addItemRow(parentEl, projectId, name, color, duration) {
+  _addItemRow(parentEl, projectId, name, color, duration, slotHour) {
     const existing = this.items.find(i => i.projectId === projectId);
     if (existing) { existing.duration += duration; this._refreshAll(); return; }
 
-    const item = { projectId, name, color, duration: Math.min(duration, this.totalGap) };
+    const item = { projectId, name, color, duration: Math.min(duration, this.totalGap), slotHour: slotHour || new Date().getHours() };
     this.items.push(item);
+    // 按时间重新排序
+    this.items.sort((a, b) => (a.slotHour || 0) - (b.slotHour || 0));
 
     const row = parentEl.createDiv('tig-split-item');
     row._item = item;
@@ -1661,9 +1676,36 @@ class TimeIsGoldMainView extends ItemView {
     svg.setAttribute('width', '100%'); svg.setAttribute('height', String(barH));
     svg.style.marginBottom = '8px'; svg.style.borderRadius = '4px';
 
+    // 计算全天覆盖范围（包括间隙）
+    const firstTime = entries.length > 0 ? new Date(entries[0].startTime) : new Date();
+    const lastTime = entries.length > 0 ? new Date(entries[entries.length - 1].endTime) : new Date();
+    const totalSpanMin = Math.max(totalDayMin, (lastTime - firstTime) / 60000);
+    const totalSpan = Math.max(totalDayMin, totalSpanMin);
+
     let x = 0;
+    let prevEnd = null;
     for (const e of entries) {
-      const w = Math.max(2, (e.duration / totalDayMin) * barW);
+      const startTime = new Date(e.startTime);
+      // 间隙（未记录时间段）
+      if (prevEnd && startTime > prevEnd) {
+        const gapMin = (startTime - prevEnd) / 60000;
+        if (gapMin >= 1) {
+          const gapW = Math.max(2, (gapMin / totalSpan) * barW);
+          const gapRect = document.createElementNS(NS, 'rect');
+          gapRect.setAttribute('x', x.toFixed(1)); gapRect.setAttribute('y', '0');
+          gapRect.setAttribute('width', gapW.toFixed(1)); gapRect.setAttribute('height', String(barH));
+          gapRect.setAttribute('fill', 'var(--background-modifier-border)');
+          gapRect.setAttribute('rx', '3'); gapRect.setAttribute('opacity', '0.4');
+          gapRect.style.cursor = 'pointer';
+          const gapTitle = document.createElementNS(NS, 'title');
+          gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
+          gapRect.appendChild(gapTitle);
+          svg.appendChild(gapRect);
+          x += gapW;
+        }
+      }
+
+      const w = Math.max(2, (e.duration / totalSpan) * barW);
       const isBlank = e.projectId === '__blank__';
       const p = isBlank ? null : dm.getProject(e.projectId);
       const color = isBlank ? 'transparent' : (p?.color || '#9E9E9E');
@@ -1682,7 +1724,6 @@ class TimeIsGoldMainView extends ItemView {
         rect.setAttribute('fill', color);
         rect.setAttribute('rx', '2');
       }
-      rect.setAttribute('data-entry-id', e.id);
       rect.style.cursor = 'pointer';
       rect.addEventListener('click', (evt) => {
         this._editLogEntry(e, evt);
@@ -1692,6 +1733,7 @@ class TimeIsGoldMainView extends ItemView {
       rect.appendChild(title);
       svg.appendChild(rect);
       x += w;
+      prevEnd = new Date(e.endTime);
     }
     this.logEl.appendChild(svg);
   }
