@@ -1989,7 +1989,8 @@ class TimeIsGoldMainView extends ItemView {
       const startTime = new Date(e.startTime);
       // 间隙（未记录时间段）
       if (prevEnd && startTime > prevEnd) {
-        const gapMin = (startTime - prevEnd) / 60000;
+        const gapStart = new Date(prevEnd); // ⚠️ 必须捕获值！prevEnd 是 let，循环中被覆盖
+        const gapMin = (startTime - gapStart) / 60000;
         if (gapMin >= 1) {
           const gapW = Math.max(2, (gapMin / totalSpan) * barW);
           const gapRect = document.createElementNS(NS, 'rect');
@@ -2001,12 +2002,11 @@ class TimeIsGoldMainView extends ItemView {
           gapRect.addEventListener('click', (evt) => {
             evt.stopPropagation();
             const gapCtx = {
-              startTime: prevEnd.toISOString(),
+              startTime: gapStart.toISOString(),
               endTime: startTime.toISOString(),
               gapMin: Math.round(gapMin)
             };
             new QuickRecordModal(this.app, this.plugin, () => {
-              // 间隙填补后全量刷新计时面板（比 refreshTodayLog 更稳健）
               this.renderPanel('timer');
             }, gapCtx).open();
           });
