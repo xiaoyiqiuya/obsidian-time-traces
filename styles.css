@@ -737,12 +737,8 @@
   color: var(--text-muted);
   margin: 8px 0 6px;
 }
-.tig-split-rec-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.tig-split-recs {
+/* 分账 — 统一项目列表 */
+.tig-split-items {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -755,6 +751,10 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--background-primary-alt);
+}
+.tig-split-main {
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
 }
 .tig-split-dot {
   width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
