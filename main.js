@@ -1146,12 +1146,10 @@ class SplitRecordModal extends Modal {
       rowB.style.transform = `translateY(${dir > 0 ? -h : h}px)`;
       setTimeout(() => {
         [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-        this._mainManuallySet = false;
         this._renderAll();
       }, 180);
     } else {
       [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-      this._mainManuallySet = false;
       this._renderAll();
     }
   }
