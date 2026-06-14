@@ -863,8 +863,7 @@ class SplitRecordModal extends Modal {
     blankBtn.addEventListener('click', () => {
       const gap = this.totalGap - this.allocatedMin;
       if (gap > 0) {
-        const mainItem = this.items.find(i => i.isMain);
-        if (mainItem) mainItem.duration = gap;
+        this._mainManuallySet = false;
         this._renderAll();
         new Notice(`⬜ 剩余 ${fmtDuration(gap)} 已标为空白`);
       }
@@ -953,11 +952,11 @@ class SplitRecordModal extends Modal {
 
   // ── 添加项目到数组（不渲染 DOM）──
   _addItem(projectId, name, color, duration, slotHour) {
+    this._mainManuallySet = false;
     const existing = this.items.find(i => i.projectId === projectId);
     if (existing) { existing.duration += duration; return; }
     const item = { projectId, name, color, duration: Math.min(duration, this.totalGap), slotHour: slotHour || new Date().getHours() };
     this.items.push(item);
-    this._mainManuallySet = false;
   }
 
   _renderAll() {
