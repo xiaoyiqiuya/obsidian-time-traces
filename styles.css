@@ -755,6 +755,19 @@
   font-size: 16px;
   margin: 0 0 12px 0;
 }
+/* 智能推荐点击添加 */
+.tig-split-suggestions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.tig-split-suggest-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--background-modifier-border);
+  border-radius: 14px; background: var(--background-primary);
+  cursor: pointer; font-size: 12px; transition: all 0.12s;
+}
+.tig-split-suggest-btn:hover { border-color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.tig-split-suggest-dur {
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-monospace);
+}
+
 .tig-split-label {
   font-size: 12px;
   color: var(--text-muted);

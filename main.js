@@ -852,22 +852,34 @@ class SplitRecordModal extends Modal {
       text: `📋 距上次记录 ${fmtDuration(this.totalGap)}（${fmtTime(lastTime.toISOString())} → ${fmtTime(now.toISOString())}）`
     });
 
-    // ── 统一项目列表（智能推荐 + 主项目，用户可手动排序）──
+    // ── 统一项目列表（主项目占满 gap，智能推荐点击添加）──
     this.itemsEl = contentEl.createDiv('tig-split-recs');
 
-    // 智能推荐：加入 items 数组
-    const recs = dm.getSmartRecommendations(this.totalGap);
-    for (const r of recs) {
-      if (r.projectId === this.mainProjectId) continue;
-      this._addItem(r.projectId, r.name, r.color, r.duration, r.slotHour);
-    }
-
-    // 主项目也加入 items（排最后，isMain 标记，自动吸收剩余时间）
+    // 主项目：初始占满整个 gap
     this._addItem(this.mainProjectId, mainProject?.name || '项目', mainProject?.color || '#9E9E9E', this.totalGap, new Date().getHours());
     const mainItem = this.items.find(i => i.projectId === this.mainProjectId);
     if (mainItem) mainItem.isMain = true;
-    this._mainManuallySet = false; // 初始始终 auto-absorb
+    this._mainManuallySet = false;
     this._renderAll();
+
+    // 智能推荐：只展示，点击才添加
+    const recs = dm.getSmartRecommendations(this.totalGap);
+    const otherRecs = recs.filter(r => r.projectId !== this.mainProjectId);
+    if (otherRecs.length > 0) {
+      contentEl.createEl('p', { text: '💡 智能推荐 · 点击添加', cls: 'tig-split-label' });
+      const recsEl = contentEl.createDiv('tig-split-suggestions');
+      for (const r of otherRecs) {
+        const btn = recsEl.createEl('button', { cls: 'tig-split-suggest-btn' });
+        const dot = btn.createSpan('tig-split-dot');
+        dot.style.backgroundColor = r.color;
+        btn.createSpan({ text: r.name });
+        btn.createSpan({ text: fmtDuration(r.duration), cls: 'tig-split-suggest-dur' });
+        btn.addEventListener('click', () => {
+          this._addItem(r.projectId, r.name, r.color, r.duration, r.slotHour);
+          this._renderAll();
+        });
+      }
+    }
 
     // ⬜ 空白（遗忘时间）
     const blankRow = contentEl.createDiv('tig-split-add-row');
@@ -2177,7 +2189,8 @@ class TimeIsGoldMainView extends ItemView {
     }
     segments.length = 0; segments.push(...merged);
 
-    if (prevEnd < dayEnd) {
+    // 今天不显示末尾间隙（未记录时间属于脚步计时池，非待分配）
+    if (prevEnd < dayEnd && !isToday) {
       const gapMin = Math.round((dayEnd - prevEnd) / 60000);
       if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: dayEnd, duration: gapMin });
     }
