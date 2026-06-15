@@ -2101,7 +2101,7 @@ class TimeIsGoldMainView extends ItemView {
         const sitColor = p?.color || '#9E9E9E';
 
         const card = row.createDiv('tig-tl-card');
-        card.style.borderLeftColor = sitColor;
+        card.style.borderRightColor = sitColor;
         card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
         card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
