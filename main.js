@@ -533,9 +533,10 @@ class DataManager {
 
   // ── 分账写入 ──
 
-  async recordSplitEntries(splitEntries) {
+  async recordSplitEntries(splitEntries, baseTimeISO = null) {
     const entries = this.data.entries || [];
-    let prevEnd = this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : new Date(Date.now() - 3600000);
+    const base = baseTimeISO ? new Date(baseTimeISO) : (this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : new Date(Date.now() - 3600000));
+    let prevEnd = base;
 
     for (const se of splitEntries) {
       const startTime = new Date(prevEnd);
@@ -822,14 +823,16 @@ class QuickRecordModal extends Modal {
 // ═══════════════════════════════════════════
 
 class SplitRecordModal extends Modal {
-  constructor(app, plugin, gapInfo, mainProjectId, onDone) {
+  // baseTime（可选）: ISO 字符串，分账的起始时间（用于时间轴间隙填补）
+  constructor(app, plugin, gapInfo, mainProjectId, onDone, baseTime = null) {
     super(app);
     this.plugin = plugin;
     this.gapInfo = gapInfo;
     this.mainProjectId = mainProjectId;
     this.onDone = onDone;
-    this.items = []; // { projectId, name, color, duration, slotHour }
-    this.defaultStep = 15; // 15 分钟步进
+    this.baseTime = baseTime;
+    this.items = [];
+    this.defaultStep = 15;
   }
 
   get totalGap() { return this.gapInfo.gapMinutes; }
@@ -949,7 +952,7 @@ class SplitRecordModal extends Modal {
       if (entries.length === 0) {
         entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
       }
-      await dm.recordSplitEntries(entries);
+      await dm.recordSplitEntries(entries, this.baseTime);
       this.close();
       if (this.onDone) this.onDone();
       const projectNames = [...new Set(entries.map(e => {
@@ -2119,8 +2122,10 @@ class TimeIsGoldMainView extends ItemView {
         card.createSpan({ text: `未记录 · ${fmtDuration(seg.duration)}`, cls: 'tig-tl-gap-text' });
         card.createSpan({ text: '点击分配', cls: 'tig-tl-gap-hint' });
         card.addEventListener('click', () => {
-          const gapCtx = { startTime: seg.start.toISOString(), endTime: seg.end.toISOString(), gapMin: seg.duration };
-          new QuickRecordModal(this.app, this.plugin, () => { this.renderPanel('timer'); }, gapCtx).open();
+          const mainId = (dm.getRecentProjects(1)[0] || dm.getProjects()[0])?.id;
+          if (!mainId) return;
+          const gapInfo = { gapMinutes: seg.duration, isLongGap: seg.duration > 30, lastTime: seg.start.toISOString(), now: seg.end.toISOString() };
+          new SplitRecordModal(this.app, this.plugin, gapInfo, mainId, () => { this.renderPanel('timer'); }, seg.start.toISOString()).open();
         });
       } else {
         const e = seg.entry;
