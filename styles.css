@@ -54,6 +54,9 @@
 }
 
 /* ========== 分区 ========== */
+/* 日志日期导航 */
+.tig-log-nav { display: inline-flex; gap: 2px; margin: 0 8px; }
+
 .tig-section {
   margin-bottom: 20px;
   padding-bottom: 16px;

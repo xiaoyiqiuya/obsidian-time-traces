@@ -1279,6 +1279,7 @@ class TimeIsGoldMainView extends ItemView {
     this.refreshTimer = null;
     this.expandedNodes = new Set(); // 项目树展开状态
     this.treeViewMode = 'hierarchy'; // 'hierarchy' | 'situation'
+    this.logDate = today(); // 日志查看日期
   }
 
   getViewType() { return VIEW_TYPE_MAIN; }
@@ -1822,7 +1823,7 @@ class TimeIsGoldMainView extends ItemView {
     recordBtn.addEventListener('click', () => {
       new QuickRecordModal(this.app, this.plugin, () => {
         this.updateStepTimer();
-        this.refreshTodayLog();
+        this.refreshLog();
       }).open();
     });
     // 空白记录（只推进时间，不归属任何项目）
@@ -1834,7 +1835,7 @@ class TimeIsGoldMainView extends ItemView {
     blankBtn.addEventListener('click', async () => {
       await this.plugin.dataManager.recordBlankEntry();
       this.updateStepTimer();
-      this.refreshTodayLog();
+      this.refreshLog();
       new Notice('⬜ 已跳过这段时间');
     });
   }
@@ -1944,7 +1945,7 @@ class TimeIsGoldMainView extends ItemView {
       row.addEventListener('click', () => {
         this.plugin.maybeRecord(p.id, () => {
           this.updateStepTimer();
-          this.refreshTodayLog();
+          this.refreshLog();
           if (this.plugin.dataManager.getGapInfo().isLongGap) {
             // 分账面板已处理，不重复通知
           }
@@ -1968,7 +1969,7 @@ class TimeIsGoldMainView extends ItemView {
       .onClick(() => {
         new ProjectEditModal(this.app, this.plugin, project, () => {
           this.refreshQuickList();
-          this.refreshTodayLog();
+          this.refreshLog();
         }).open();
       })
     );
@@ -1999,7 +2000,7 @@ class TimeIsGoldMainView extends ItemView {
       .onClick(async () => {
         await this.plugin.dataManager.deleteProject(project.id);
         this.refreshQuickList();
-        this.refreshTodayLog();
+        this.refreshLog();
         new Notice(`已删除项目「${project.name}」`);
       })
     );
@@ -2010,33 +2011,45 @@ class TimeIsGoldMainView extends ItemView {
   buildTodayLog(container) {
     const section = container.createDiv('tig-section');
     const headerRow = section.createDiv('tig-section-header');
-    headerRow.createEl('div', { text: '📋 今日时间日志', cls: 'tig-section-title' });
+    const isToday = this.logDate === today();
+    headerRow.createEl('div', { text: isToday ? '📋 今日时间日志' : `📋 ${this.logDate} 日志`, cls: 'tig-section-title' });
     
+    // 日期导航（历史回顾）
+    const navBtns = headerRow.createSpan('tig-log-nav');
+    const prevBtn = navBtns.createEl('button', { text: '◀', cls: 'tig-btn tig-btn-sm', attr: { title: '前一天' } });
+    const todayBtn = navBtns.createEl('button', { text: '今天', cls: 'tig-btn tig-btn-sm' });
+    const nextBtn = navBtns.createEl('button', { text: '▶', cls: 'tig-btn tig-btn-sm', attr: { title: '后一天' } });
+    if (isToday) nextBtn.addClass('tig-btn-disabled');
+    prevBtn.addEventListener('click', () => { const d = new Date(this.logDate); d.setDate(d.getDate() - 1); this.logDate = fmtDate(d.toISOString()); this.renderPanel('timer'); });
+    nextBtn.addEventListener('click', () => { const d = new Date(this.logDate); d.setDate(d.getDate() + 1); if (fmtDate(d.toISOString()) < today()) { this.logDate = fmtDate(d.toISOString()); this.renderPanel('timer'); } });
+    todayBtn.addEventListener('click', () => { this.logDate = today(); this.renderPanel('timer'); });
+
     const addNoteBtn = headerRow.createEl('button', {
       text: '+ 手动记',
       cls: 'tig-btn tig-btn-sm'
     });
     addNoteBtn.addEventListener('click', () => {
       new QuickRecordModal(this.app, this.plugin, () => {
-        this.refreshTodayLog();
+        this.refreshLog();
       }).open();
     });
 
     this.logEl = section.createDiv('tig-log-list');
-    this.refreshTodayLog();
+    this.refreshLog();
   }
 
-  refreshTodayLog() {
+  refreshLog() {
     if (!this.logEl) return;
     this.logEl.empty();
 
-    const sortedEntries = this.plugin.dataManager.getTodayEntries();
+    const sortedEntries = this.plugin.dataManager.getEntriesByDate(this.logDate);
     // 时间轴可视化
     this._renderTimeline(sortedEntries);
 
     const entries = [...sortedEntries].reverse();
     if (entries.length === 0) {
-      this.logEl.createEl('p', { text: '今天还没有记录', cls: 'tig-empty' });
+      const isToday = this.logDate === today();
+      this.logEl.createEl('p', { text: isToday ? '今天还没有记录' : `${this.logDate} 没有记录`, cls: 'tig-empty' });
       return;
     }
 
