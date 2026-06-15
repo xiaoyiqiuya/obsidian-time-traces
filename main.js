@@ -1137,10 +1137,11 @@ class SplitRecordModal extends Modal {
       let targetIdx = allRows.length - 1;
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
-        if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
+        if (y < rect.top + rect.height / 2) { targetIdx = i - 1; break; }
       }
-      if (targetIdx >= 0 && targetIdx < allRows.length) {
-        allRows[targetIdx].classList.add('tig-tl-drop-target');
+      const showIdx = Math.max(0, Math.min(targetIdx, allRows.length - 1));
+      if (showIdx >= 0 && showIdx < allRows.length) {
+        allRows[showIdx].classList.add('tig-tl-drop-target');
       }
     };
 
@@ -1152,13 +1153,13 @@ class SplitRecordModal extends Modal {
       allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
       if (!dragClone) return;
       const y = dragClone.getBoundingClientRect().top + dragClone.getBoundingClientRect().height / 2;
-      let targetIdx = this.items.length - 1;
+      let targetIdx = allRows.length - 1;
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
-        if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
+        if (y < rect.top + rect.height / 2) { targetIdx = i - 1; break; }
       }
       const moved = this.items.splice(idx, 1)[0];
-      const insertAt = Math.min(targetIdx + 1, this.items.length);
+      const insertAt = Math.max(0, Math.min(targetIdx + 1, this.items.length));
       this.items.splice(insertAt, 0, moved);
       // 保存所有项目时长（防止 _renderAll 的 auto-absorb 改动）
       const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
