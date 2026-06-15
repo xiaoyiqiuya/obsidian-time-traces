@@ -807,15 +807,17 @@
 }
 .tig-split-move-btn:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
 .tig-split-move-disabled { opacity: 0.25; pointer-events: none; }
-/* 拖拽排序 */
-.tig-split-draggable { transition: transform 0.18s ease; }
-.tig-split-dragging {
+/* 分账 — 主项目标记 */
+.tig-tl-card-main { border: 1px solid var(--interactive-accent); }
+
+/* 拖拽排序（分账面板用 tig-tl 前缀） */
+.tig-tl-dragging {
   opacity: 0.92; transform: scale(1.03);
   box-shadow: 0 4px 16px rgba(0,0,0,0.25);
   border-radius: 6px;
 }
-.tig-split-drag-source { opacity: 0.3; }
-.tig-split-drop-target {
+.tig-tl-drag-source { opacity: 0.3; }
+.tig-tl-drop-target {
   border-top: 2px dashed var(--interactive-accent) !important;
   margin-top: -2px;
 }

@@ -1002,13 +1002,29 @@ class SplitRecordModal extends Modal {
   }
 
   _renderRow(parentEl, item, idx, totalItems) {
-    const row = parentEl.createDiv('tig-split-item');
-    if (item.isMain) row.addClass('tig-split-main');
-    row.addClass('tig-split-draggable');
-    row.dataset.splitIdx = String(idx);
+    // 计算该项目在总时长中的位置
+    let offsetMin = 0;
+    for (let i = 0; i < idx; i++) offsetMin += this.items[i].duration || 0;
+    const startTime = new Date(new Date(this.gapInfo.lastTime).getTime() + offsetMin * 60000);
 
-    const moveBtns = row.createSpan('tig-split-move');
+    const row = parentEl.createDiv('tig-tl-row');
+    const timeLabel = row.createDiv('tig-tl-time');
+    timeLabel.setText(fmtTime(startTime.toISOString()));
+
+    const card = row.createDiv('tig-tl-card');
+    if (item.isMain) card.addClass('tig-tl-card-main');
+
+    // 左边框比例填充
+    const maxDur = Math.max(...this.items.map(i => i.duration || 0), 1);
+    const fillPct = Math.round(((item.duration || 0) / maxDur) * 100);
+    const barFill = card.createDiv('tig-tl-bar-fill');
+    barFill.style.height = fillPct + '%';
+    barFill.style.backgroundColor = item.color;
+    if (fillPct >= 95) barFill.addClass('tig-tl-bar-full');
+
+    // ▲▼ 按钮
     if (totalItems > 1) {
+      const moveBtns = card.createSpan('tig-split-move');
       const upBtn = moveBtns.createEl('button', { text: '▲', cls: 'tig-split-move-btn', attr: { title: '上移' } });
       const downBtn = moveBtns.createEl('button', { text: '▼', cls: 'tig-split-move-btn', attr: { title: '下移' } });
       if (idx === 0) upBtn.addClass('tig-split-move-disabled');
@@ -1017,14 +1033,12 @@ class SplitRecordModal extends Modal {
       downBtn.addEventListener('click', () => { this._moveItem(idx, 1); });
     }
 
-    const dot = row.createSpan('tig-split-dot');
-    dot.style.backgroundColor = item.color;
-    row.createSpan({ text: item.isMain ? `⭐ ${item.name}` : item.name, cls: 'tig-split-name' });
+    card.createSpan({ text: item.isMain ? `⭐ ${item.name}` : item.name, cls: 'tig-tl-name' });
 
-    const minus = row.createEl('button', { text: '−', cls: 'tig-split-adj' });
-    const durEl = row.createEl('span', { text: fmtDuration(item.duration), cls: 'tig-split-dur', attr: { title: '点击输入分钟数' } });
+    const minus = card.createEl('button', { text: '−', cls: 'tig-split-adj' });
+    const durEl = card.createEl('span', { text: fmtDuration(item.duration), cls: 'tig-tl-dur', attr: { title: '点击输入分钟数' } });
     durEl.style.cursor = 'pointer';
-    const plus = row.createEl('button', { text: '+', cls: 'tig-split-adj' });
+    const plus = card.createEl('button', { text: '+', cls: 'tig-split-adj' });
 
     // 点击时长 → 输入框直接改分钟数
     durEl.addEventListener('click', (e) => {
@@ -1055,7 +1069,7 @@ class SplitRecordModal extends Modal {
     });
 
     if (!item.isMain) {
-      const del = row.createEl('button', { text: '✕', cls: 'tig-split-del' });
+      const del = card.createEl('button', { text: '✕', cls: 'tig-split-del' });
       del.addEventListener('click', () => {
         this.items = this.items.filter(i => i.projectId !== item.projectId);
         this._mainManuallySet = false;
@@ -1084,19 +1098,17 @@ class SplitRecordModal extends Modal {
     let longPressTimer = null;
     let dragClone = null;
     let startY = 0;
-    let startX = 0;
     let rowRect = null;
     let dragging = false;
 
     const onDown = (e) => {
       if (e.target.closest('button')) return;
       rowRect = row.getBoundingClientRect();
-      startX = e.clientX;
       startY = e.clientY;
       longPressTimer = setTimeout(() => {
         dragging = true;
         dragClone = row.cloneNode(true);
-        dragClone.addClass('tig-split-dragging');
+        dragClone.addClass('tig-tl-dragging');
         dragClone.style.position = 'fixed';
         dragClone.style.left = rowRect.left + 'px';
         dragClone.style.top = rowRect.top + 'px';
@@ -1104,7 +1116,7 @@ class SplitRecordModal extends Modal {
         dragClone.style.zIndex = '1000';
         dragClone.style.pointerEvents = 'none';
         document.body.appendChild(dragClone);
-        row.addClass('tig-split-drag-source');
+        row.addClass('tig-tl-drag-source');
         row.setPointerCapture(e.pointerId);
       }, 500);
     };
@@ -1114,16 +1126,15 @@ class SplitRecordModal extends Modal {
       e.preventDefault();
       const y = e.clientY;
       dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
-      dragClone.style.left = rowRect.left + 'px';
-      const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
-      rows.forEach(r => r.classList.remove('tig-split-drop-target'));
-      let targetIdx = rows.length - 1;
-      for (let i = 0; i < rows.length; i++) {
-        const rect = rows[i].getBoundingClientRect();
+      const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
+      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
+      let targetIdx = allRows.length - 1;
+      for (let i = 0; i < allRows.length; i++) {
+        const rect = allRows[i].getBoundingClientRect();
         if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
       }
-      if (targetIdx >= 0 && targetIdx < rows.length) {
-        rows[targetIdx].classList.add('tig-split-drop-target');
+      if (targetIdx >= 0 && targetIdx < allRows.length) {
+        allRows[targetIdx].classList.add('tig-tl-drop-target');
       }
     };
 
@@ -1131,13 +1142,13 @@ class SplitRecordModal extends Modal {
       clearTimeout(longPressTimer);
       if (!dragging) return;
       dragging = false;
-      const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
-      rows.forEach(r => r.classList.remove('tig-split-drop-target'));
+      const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
+      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
       if (!dragClone) return;
       const y = dragClone.getBoundingClientRect().top + dragClone.getBoundingClientRect().height / 2;
       let targetIdx = this.items.length - 1;
-      for (let i = 0; i < rows.length; i++) {
-        const rect = rows[i].getBoundingClientRect();
+      for (let i = 0; i < allRows.length; i++) {
+        const rect = allRows[i].getBoundingClientRect();
         if (y < rect.top + rect.height / 2) { targetIdx = Math.max(0, i - 1); break; }
       }
       const moved = this.items.splice(idx, 1)[0];
@@ -1145,7 +1156,7 @@ class SplitRecordModal extends Modal {
       this.items.splice(insertAt, 0, moved);
       dragClone.remove();
       dragClone = null;
-      row.removeClass('tig-split-drag-source');
+      row.removeClass('tig-tl-drag-source');
       this._renderAll();
     };
 
@@ -1154,7 +1165,7 @@ class SplitRecordModal extends Modal {
     row.addEventListener('pointerup', onUp);
     row.addEventListener('pointercancel', () => {
       clearTimeout(longPressTimer); dragging = false;
-      if (dragClone) { dragClone.remove(); dragClone = null; row.removeClass('tig-split-drag-source'); }
+      if (dragClone) { dragClone.remove(); dragClone = null; row.removeClass('tig-tl-drag-source'); }
     });
     row.style.touchAction = 'none';
   }
@@ -1163,7 +1174,7 @@ class SplitRecordModal extends Modal {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= this.items.length) return;
     // 动画交换
-    const rows = [...this.itemsEl.querySelectorAll('.tig-split-item')];
+    const rows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
     const rowA = rows[idx];
     const rowB = rows[newIdx];
     if (rowA && rowB) {
