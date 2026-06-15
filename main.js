@@ -1160,10 +1160,18 @@ class SplitRecordModal extends Modal {
       const moved = this.items.splice(idx, 1)[0];
       const insertAt = Math.min(targetIdx + 1, this.items.length);
       this.items.splice(insertAt, 0, moved);
+      // 保存所有项目时长（防止 _renderAll 的 auto-absorb 改动）
+      const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
       dragClone.remove();
       dragClone = null;
       row.removeClass('tig-tl-drag-source');
       this._renderAll();
+      // 恢复时长
+      for (const saved of savedDurations) {
+        const item = this.items.find(i => i.projectId === saved.id);
+        if (item) item.duration = saved.dur;
+      }
+      this._renderSummary();
     };
 
     row.addEventListener('pointerdown', onDown);
@@ -1179,21 +1187,30 @@ class SplitRecordModal extends Modal {
   _moveItem(idx, dir) {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= this.items.length) return;
-    // 动画交换
+    // 仅交换数据和 DOM 位置，不触发 _renderAll（保护时长不变）
     const rows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-    const rowA = rows[idx];
-    const rowB = rows[newIdx];
+    const rowA = rows[idx], rowB = rows[newIdx];
     if (rowA && rowB) {
-      const h = rowA.getBoundingClientRect().height + 4; // 4 = gap
-      rowA.style.transform = `translateY(${dir > 0 ? h : -h}px)`;
-      rowB.style.transform = `translateY(${dir > 0 ? -h : h}px)`;
-      setTimeout(() => {
+      // 平滑交换：用 translateY 做视觉动画
+      const hA = rowA.getBoundingClientRect().height;
+      const hB = rowB.getBoundingClientRect().height;
+      rowA.style.transition = 'transform 0.2s ease';
+      rowB.style.transition = 'transform 0.2s ease';
+      rowA.style.transform = `translateY(${dir > 0 ? hB + 4 : -(hA + 4)}px)`;
+      rowB.style.transform = `translateY(${dir > 0 ? -(hA + 4) : hB + 4}px)`;
+      const onEnd = () => {
+        rowA.style.transition = ''; rowA.style.transform = '';
+        rowB.style.transition = ''; rowB.style.transform = '';
+        // 交换 DOM 位置
+        if (dir > 0) rowA.parentNode.insertBefore(rowA, rowB.nextSibling);
+        else rowB.parentNode.insertBefore(rowB, rowA);
+        // 交换数据
         [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-        this._renderAll();
-      }, 180);
-    } else {
-      [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-      this._renderAll();
+        // 只刷新汇总，不重建卡片（保护时长）
+        this._renderSummary();
+        rowA.removeEventListener('transitionend', onEnd);
+      };
+      rowA.addEventListener('transitionend', onEnd, { once: true });
     }
   }
 
