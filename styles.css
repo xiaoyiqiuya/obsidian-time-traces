@@ -866,9 +866,11 @@
 .tig-tl-newest-first .tig-tl-row { align-items: flex-end; }
 .tig-tl-time { width: 42px; font-size: 10px; color: var(--text-muted); font-family: var(--font-monospace); text-align: right; padding: 2px 6px 0 0; flex-shrink: 0; line-height: 1.2; }
 .tig-tl-newest-first .tig-tl-time { padding: 0 6px 2px 0; }
-.tig-tl-card { flex: 1; margin: 2px 0 2px 6px; padding: 6px 10px; border-radius: 6px; border-right: 3px solid #9E9E9E; background: var(--background-primary); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.12s; }
+.tig-tl-card { flex: 1; margin: 2px 0 2px 6px; padding: 6px 10px 6px 12px; border-radius: 6px; background: var(--background-primary); cursor: pointer; position: relative; display: flex; align-items: center; gap: 8px; transition: background 0.12s; overflow: hidden; }
+.tig-tl-bar-fill { position: absolute; left: 0; bottom: 0; width: 4px; border-radius: 0 2px 0 0; min-height: 3px; }
+.tig-tl-bar-full { border-radius: 2px 2px 0 0; }
 .tig-tl-card:hover { background: var(--background-modifier-hover); }
-.tig-tl-gap { border-right: 3px dashed var(--text-faint) !important; background: var(--background-secondary); }
+.tig-tl-gap { background: var(--background-secondary); }
 .tig-tl-gap-text { font-size: 13px; color: var(--text-muted); flex: 1; }
 .tig-tl-gap-hint { font-size: 11px; color: var(--text-faint); }
 .tig-tl-name { font-size: 13px; font-weight: 500; flex: 1; }

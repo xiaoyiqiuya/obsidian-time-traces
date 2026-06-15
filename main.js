@@ -2079,6 +2079,9 @@ class TimeIsGoldMainView extends ItemView {
     // 渲染竖轴
     const tl = this.logEl.createDiv('tig-timeline');
     if (newestFirst) tl.addClass('tig-tl-newest-first');
+
+    // 计算全天最长事件时长（用于左边框比例）
+    const maxDur = Math.max(...segments.filter(s => s.type === 'entry').map(s => s.duration), 1);
     let totalDay = 0;
 
     for (const seg of segments) {
@@ -2101,7 +2104,11 @@ class TimeIsGoldMainView extends ItemView {
         const sitColor = p?.color || '#9E9E9E';
 
         const card = row.createDiv('tig-tl-card');
-        card.style.borderRightColor = sitColor;
+        const fillPct = Math.round((e.duration / maxDur) * 100);
+        const barFill = card.createDiv('tig-tl-bar-fill');
+        barFill.style.height = fillPct + '%';
+        barFill.style.backgroundColor = sitColor;
+        if (fillPct >= 95) barFill.addClass('tig-tl-bar-full');
         card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
         card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
