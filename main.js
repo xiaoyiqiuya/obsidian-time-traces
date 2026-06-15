@@ -584,8 +584,15 @@ class DataManager {
   }
 
   getEntriesByDate(date) {
+    // 返回 endTime 在某天的条目 + 跨天条目（startTime < 次日00:00 && endTime > 当日00:00）
+    const dayStart = new Date(date + 'T00:00:00');
+    const dayEnd = new Date(date + 'T23:59:59');
     return (this.data.entries || [])
-      .filter(e => e.startTime && fmtDate(e.endTime) === date)
+      .filter(e => {
+        if (!e.startTime) return false;
+        const st = new Date(e.startTime), et = new Date(e.endTime);
+        return et >= dayStart && st <= dayEnd;
+      })
       .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   }
 
@@ -2062,12 +2069,17 @@ class TimeIsGoldMainView extends ItemView {
     let prevEnd = dayStart;
     for (const e of sortedEntries) {
       const st = new Date(e.startTime);
-      if (st > prevEnd) {
-        const gapMin = Math.round((st - prevEnd) / 60000);
-        if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: new Date(st), duration: gapMin });
+      const et = new Date(e.endTime);
+      // 钳制到当天范围（跨日事件只显示当天部分）
+      const clampSt = st < dayStart ? dayStart : st;
+      const clampEt = et > dayEnd ? dayEnd : et;
+      if (clampSt > prevEnd) {
+        const gapMin = Math.round((clampSt - prevEnd) / 60000);
+        if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: new Date(clampSt), duration: gapMin });
       }
-      segments.push({ type: 'entry', entry: e, start: new Date(e.startTime), end: new Date(e.endTime), duration: e.duration || 0 });
-      prevEnd = new Date(e.endTime);
+      const clampedDur = Math.round((clampEt - clampSt) / 60000);
+      if (clampedDur >= 1) segments.push({ type: 'entry', entry: e, start: clampSt, end: clampEt, duration: clampedDur });
+      prevEnd = clampEt > prevEnd ? clampEt : prevEnd;
     }
     if (prevEnd < dayEnd) {
       const gapMin = Math.round((dayEnd - prevEnd) / 60000);
@@ -2175,15 +2187,21 @@ class TimeIsGoldMainView extends ItemView {
 
     const startD = new Date(entry.startTime);
     const endD = new Date(entry.endTime);
+    const sdStr = fmtDate(entry.startTime);
+    const edStr = fmtDate(entry.endTime);
 
-    const row1 = modal.contentEl.createDiv('tig-time-row');
-    row1.createSpan({ text: '开始 ' });
-    const sh = row1.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'23', value: String(startD.getHours()) } });
-    row1.createSpan({ text: ':' });
-    const sm = row1.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'59', value: String(startD.getMinutes()).padStart(2,'0') } });
+    // 开始日期 + 时间
+    const row0 = modal.contentEl.createDiv('tig-time-row');
+    row0.createSpan({ text: '开始' });
+    const sd = row0.createEl('input', { type: 'date', cls: 'tig-time-inp', attr: { value: sdStr } });
+    const sh = row0.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'23', value: String(startD.getHours()) } });
+    row0.createSpan({ text: ':' });
+    const sm = row0.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'59', value: String(startD.getMinutes()).padStart(2,'0') } });
 
+    // 结束日期 + 时间
     const row2 = modal.contentEl.createDiv('tig-time-row');
-    row2.createSpan({ text: '结束 ' });
+    row2.createSpan({ text: '结束' });
+    const ed = row2.createEl('input', { type: 'date', cls: 'tig-time-inp', attr: { value: edStr } });
     const eh = row2.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'23', value: String(endD.getHours()) } });
     row2.createSpan({ text: ':' });
     const em = row2.createEl('input', { type: 'number', cls: 'tig-time-inp', attr: { min:'0', max:'59', value: String(endD.getMinutes()).padStart(2,'0') } });
@@ -2192,18 +2210,18 @@ class TimeIsGoldMainView extends ItemView {
     durEl.setText(`时长: ${fmtDuration(entry.duration)}`);
 
     const updateDur = () => {
-      const s = new Date(startD); s.setHours(parseInt(sh.value)||0, parseInt(sm.value)||0, 0, 0);
-      const e = new Date(endD); e.setHours(parseInt(eh.value)||0, parseInt(em.value)||0, 0, 0);
+      const s = new Date(sd.value + 'T' + String(sh.value).padStart(2,'0') + ':' + String(sm.value).padStart(2,'0') + ':00');
+      const e = new Date(ed.value + 'T' + String(eh.value).padStart(2,'0') + ':' + String(em.value).padStart(2,'0') + ':00');
       const d = Math.round((e - s) / 60000);
       durEl.setText(`时长: ${d > 0 ? fmtDuration(d) : '⚠️ 无效'}`);
     };
-    [sh, sm, eh, em].forEach(el => el.addEventListener('input', updateDur));
+    [sd, sh, sm, ed, eh, em].forEach(el => el.addEventListener('input', updateDur));
 
     const btnRow = modal.contentEl.createDiv('tig-split-btns');
     const saveBtn = btnRow.createEl('button', { text: '保存', cls: 'tig-split-confirm' });
     saveBtn.addEventListener('click', async () => {
-      const s = new Date(startD); s.setHours(parseInt(sh.value)||0, parseInt(sm.value)||0, 0, 0);
-      const e = new Date(endD); e.setHours(parseInt(eh.value)||0, parseInt(em.value)||0, 0, 0);
+      const s = new Date(sd.value + 'T' + String(sh.value).padStart(2,'0') + ':' + String(sm.value).padStart(2,'0') + ':00');
+      const e = new Date(ed.value + 'T' + String(eh.value).padStart(2,'0') + ':' + String(em.value).padStart(2,'0') + ':00');
       const d = Math.round((e - s) / 60000);
       if (d <= 0) { new Notice('结束时间必须在开始时间之后'); return; }
       entry.startTime = s.toISOString();
