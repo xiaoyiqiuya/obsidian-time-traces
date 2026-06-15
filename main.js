@@ -3508,7 +3508,7 @@ class TimeIsGoldPlugin extends Plugin {
 
     // CORS preflight
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' });
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' });
       res.end(); return;
     }
 
@@ -3560,6 +3560,22 @@ class TimeIsGoldPlugin extends Plugin {
           if (!b.name) return send(400, { error: 'name required' });
           const p = await dm.addProject(b.name, null, null, b.situation || null);
           return send(200, { project: p });
+
+        } else if (req.method === 'DELETE' && path === '/record') {
+          const id = url.searchParams.get('id');
+          if (!id) return send(400, { error: 'id required as query param: /record?id=xxx' });
+          const entry = (dm.data.entries || []).find(e => e.id === id);
+          if (!entry) return send(404, { error: 'record not found: ' + id });
+          dm.data.entries = (dm.data.entries || []).filter(e => e.id !== id);
+          // 如果删除的是最后一条，更新 lastRecordTime
+          if (dm.data.entries.length === 0) {
+            dm.data.lastRecordTime = null;
+          } else {
+            dm.data.lastRecordTime = dm.data.entries[dm.data.entries.length - 1].endTime;
+          }
+          await this.saveData();
+          this.refreshAllViews();
+          return send(200, { ok: true, deleted: { id, project: dm.getProject(entry.projectId)?.name || '?' } });
 
         } else if (req.method === 'GET' && (path === '/today' || path === '/day')) {
           const date = url.searchParams.get('date') || today();
