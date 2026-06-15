@@ -966,10 +966,20 @@ class SplitRecordModal extends Modal {
 
   // ── 添加项目到数组（不渲染 DOM）──
   _addItem(projectId, name, color, duration, slotHour) {
-    this._mainManuallySet = false;
     const existing = this.items.find(i => i.projectId === projectId);
-    if (existing) { existing.duration += duration; return; }
-    const item = { projectId, name, color, duration: Math.min(duration, this.totalGap), slotHour: slotHour || new Date().getHours() };
+    if (existing) {
+      // 已有项目追加时长：不超过剩余可分配空间
+      const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
+      const remaining = this.totalGap - otherSum;
+      existing.duration += Math.min(duration, Math.max(0, remaining));
+      return;
+    }
+    // 新项目：默认时长不超过剩余空间
+    const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
+    const remaining = this.totalGap - otherSum;
+    const capped = Math.min(duration, Math.max(this.defaultStep, remaining));
+    if (capped <= 0) return;
+    const item = { projectId, name, color, duration: capped, slotHour: slotHour || new Date().getHours() };
     this.items.push(item);
   }
 
@@ -1054,7 +1064,10 @@ class SplitRecordModal extends Modal {
     }
 
     const update = () => {
-      item.duration = Math.max(this.defaultStep, Math.min(item.duration, this.totalGap));
+      // 计算当前项目可调整的上限（保证总时长不超 totalGap）
+      const otherSum = this.items.reduce((s, i) => (i === item ? s : s + i.duration), 0);
+      const maxAllowed = Math.max(this.defaultStep, this.totalGap - otherSum);
+      item.duration = Math.max(this.defaultStep, Math.min(item.duration, maxAllowed));
       durEl.setText(fmtDuration(item.duration));
       if (item.isMain) {
         this._mainManuallySet = true;
