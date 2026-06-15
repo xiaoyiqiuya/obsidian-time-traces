@@ -2605,6 +2605,7 @@ class StatisticsView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.activeTab = 'week';
+    this.statsDate = today(); // 当前查看的日期
   }
 
   getViewType() { return VIEW_TYPE_STATS; }
@@ -2627,6 +2628,33 @@ class StatisticsView extends ItemView {
   }
 
   buildTabs(container) {
+    // 日期导航
+    const navRow = container.createDiv('tig-stats-nav');
+    const prevBtn = navRow.createEl('button', { text: '◀', cls: 'tig-stats-nav-btn', attr: { title: '前一天' } });
+    const dateEl = navRow.createEl('span', { text: this.statsDate, cls: 'tig-stats-nav-date' });
+    const nextBtn = navRow.createEl('button', { text: '▶', cls: 'tig-stats-nav-btn', attr: { title: '后一天' } });
+    const todayBtn = navRow.createEl('button', { text: '今天', cls: 'tig-stats-nav-today' });
+
+    const navigate = (days) => {
+      const d = new Date(this.statsDate); d.setDate(d.getDate() + days);
+      this.statsDate = fmtDate(d.toISOString());
+      dateEl.setText(this.statsDate);
+      this.renderActiveTab();
+    };
+    prevBtn.addEventListener('click', () => navigate(-1));
+    nextBtn.addEventListener('click', () => navigate(1));
+    todayBtn.addEventListener('click', () => { this.statsDate = today(); dateEl.setText(this.statsDate); this.renderActiveTab(); });
+    dateEl.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'date'; input.value = this.statsDate;
+      input.style.cssText = 'width:130px;margin:0 8px';
+      dateEl.replaceWith(input); input.focus();
+      input.addEventListener('change', () => { this.statsDate = input.value; input.replaceWith(dateEl); dateEl.setText(this.statsDate); this.renderActiveTab(); });
+      input.addEventListener('blur', () => { input.replaceWith(dateEl); });
+    });
+    dateEl.style.cursor = 'pointer';
+    dateEl.title = '点击选择日期';
+
     const tabBar = container.createDiv('tig-stats-tabs');
     const tabs = [
       { id: 'week', label: '📅 本周' },
@@ -2656,7 +2684,7 @@ class StatisticsView extends ItemView {
 
   renderWeekView() {
     const dm = this.plugin.dataManager;
-    const monday = getMonday(new Date());
+    const monday = getMonday(new Date(this.statsDate));
     const days = []; for (let i = 0; i < 7; i++) days.push(addDays(monday, i));
     const dailyTotals = days.map(d => {
       const entries = (this.plugin.data.entries || []).filter(e => fmtDate(e.endTime) === d);
@@ -2749,7 +2777,7 @@ class StatisticsView extends ItemView {
 
   renderMonthView() {
     const dm = this.plugin.dataManager;
-    const firstDay = getFirstOfMonth(new Date());
+    const firstDay = getFirstOfMonth(new Date(this.statsDate));
     const entries = dm.getEntriesForStats(firstDay);
     const pm = {};
     for (const e of entries) {

@@ -593,6 +593,26 @@
 }
 
 /* 统计 Tab 栏 */
+/* 统计 — 日期导航 */
+.tig-stats-nav {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+}
+.tig-stats-nav-btn {
+  width: 28px; height: 28px; border: 1px solid var(--background-modifier-border);
+  border-radius: 4px; background: var(--background-primary);
+  cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center;
+}
+.tig-stats-nav-btn:hover { background: var(--background-modifier-hover); }
+.tig-stats-nav-date {
+  font-size: 14px; font-weight: 600; min-width: 100px; text-align: center;
+}
+.tig-stats-nav-today {
+  padding: 4px 10px; border: 1px solid var(--background-modifier-border);
+  border-radius: 4px; background: var(--background-primary);
+  cursor: pointer; font-size: 12px;
+}
+.tig-stats-nav-today:hover { background: var(--background-modifier-hover); }
+
 .tig-stats-tabs {
   display: flex;
   gap: 4px;
