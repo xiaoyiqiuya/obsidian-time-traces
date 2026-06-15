@@ -52,7 +52,9 @@ const DEFAULT_SETTINGS = {
   dataLocation: "vault",
   dataFolder: "时迹数据",
   httpEnabled: false,
-  httpToken: ""
+  httpToken: "",
+  timelineOrder: "oldest-first",
+  treeDefaultView: "situation"
 };
 
 function uid() {
@@ -1278,7 +1280,7 @@ class TimeIsGoldMainView extends ItemView {
     this.activeTab = 'timer'; // 'timer' | 'tree' | 'stats'
     this.refreshTimer = null;
     this.expandedNodes = new Set(); // 项目树展开状态
-    this.treeViewMode = 'hierarchy'; // 'hierarchy' | 'situation'
+    this.treeViewMode = this.plugin.settings.treeDefaultView || 'situation';
     this.logDate = today(); // 日志查看日期
   }
 
@@ -2042,173 +2044,88 @@ class TimeIsGoldMainView extends ItemView {
     if (!this.logEl) return;
     this.logEl.empty();
 
-    const sortedEntries = this.plugin.dataManager.getEntriesByDate(this.logDate);
-    // 时间轴可视化
-    this._renderTimeline(sortedEntries);
+    const dm = this.plugin.dataManager;
+    const sortedEntries = dm.getEntriesByDate(this.logDate);
 
-    const entries = [...sortedEntries].reverse();
-    if (entries.length === 0) {
+    if (sortedEntries.length === 0) {
       const isToday = this.logDate === today();
       this.logEl.createEl('p', { text: isToday ? '今天还没有记录' : `${this.logDate} 没有记录`, cls: 'tig-empty' });
       return;
     }
 
-    let totalDay = 0;
-    for (const entry of entries) {
-      totalDay += entry.duration || 0;
-      const project = this.plugin.dataManager.getProject(entry.projectId);
-      const row = this.logEl.createDiv('tig-log-row');
+    const newestFirst = this.plugin.settings.timelineOrder === 'newest-first';
+    const dayStart = new Date(this.logDate + 'T00:00:00');
+    const dayEnd = new Date(this.logDate + 'T23:59:59');
 
-      // 时间
-      const timeEl = row.createSpan('tig-log-time');
-      timeEl.setText(fmtTime(entry.endTime));
-
-      // 项目名（带颜色）
-      const nameEl = row.createSpan('tig-log-name');
-      nameEl.setText(project ? project.name : '(已删除)');
-      if (project?.color) {
-        nameEl.style.color = project.color;
-        nameEl.style.fontWeight = '600';
+    // 构建时间线：entries + gaps → segments 数组
+    const segments = [];
+    let prevEnd = dayStart;
+    for (const e of sortedEntries) {
+      const st = new Date(e.startTime);
+      if (st > prevEnd) {
+        const gapMin = Math.round((st - prevEnd) / 60000);
+        if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: new Date(st), duration: gapMin });
       }
-
-      // 时长
-      const durEl = row.createSpan('tig-log-dur');
-      durEl.setText(fmtDuration(entry.duration));
-
-      // 点击条目 → 编辑/删
-      row.addEventListener('click', (evt) => {
-        this._editLogEntry(entry, evt);
-      });
-
-      // 删除按钮
-      const delBtn = row.createSpan('tig-log-del');
-      delBtn.setText('×');
-      delBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await this._deleteLogEntry(entry);
-      });
+      segments.push({ type: 'entry', entry: e, start: new Date(e.startTime), end: new Date(e.endTime), duration: e.duration || 0 });
+      prevEnd = new Date(e.endTime);
+    }
+    if (prevEnd < dayEnd) {
+      const gapMin = Math.round((dayEnd - prevEnd) / 60000);
+      if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: dayEnd, duration: gapMin });
     }
 
-    // 今日总计
+    if (newestFirst) segments.reverse();
+
+    // 渲染竖轴
+    const tl = this.logEl.createDiv('tig-timeline');
+    let totalDay = 0;
+
+    for (const seg of segments) {
+      const row = tl.createDiv('tig-tl-row');
+      const timeLabel = row.createDiv('tig-tl-time');
+      timeLabel.setText(fmtTime(seg.start.toISOString()));
+
+      const bar = row.createDiv('tig-tl-bar');
+
+      if (seg.type === 'gap') {
+        const card = row.createDiv('tig-tl-card tig-tl-gap');
+        card.createSpan({ text: `未记录 · ${fmtDuration(seg.duration)}`, cls: 'tig-tl-gap-text' });
+        card.createSpan({ text: '点击分配', cls: 'tig-tl-gap-hint' });
+        card.addEventListener('click', () => {
+          const gapCtx = { startTime: seg.start.toISOString(), endTime: seg.end.toISOString(), gapMin: seg.duration };
+          new QuickRecordModal(this.app, this.plugin, () => { this.renderPanel('timer'); }, gapCtx).open();
+        });
+        bar.addClass('tig-tl-bar-gap');
+      } else {
+        const e = seg.entry;
+        totalDay += e.duration || 0;
+        const p = e.projectId === '__blank__' ? null : dm.getProject(e.projectId);
+        const sitColor = p?.color || '#9E9E9E';
+
+        const card = row.createDiv('tig-tl-card');
+        card.style.borderLeftColor = sitColor;
+        bar.style.backgroundColor = sitColor;
+
+        const nameEl = card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
+        const durEl = card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
+
+        card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
+
+        const delBtn = card.createEl('button', { text: '×', cls: 'tig-tl-del' });
+        delBtn.addEventListener('click', async (ev) => { ev.stopPropagation(); await this._deleteLogEntry(e); });
+      }
+    }
+
+    // 结尾时间标记
+    const lastRow = tl.createDiv('tig-tl-row');
+    const endSeg = segments[segments.length - 1];
+    lastRow.createDiv('tig-tl-time').setText(newestFirst ? '00:00' : '24:00');
+    lastRow.createDiv('tig-tl-bar').addClass('tig-tl-bar-end');
+
+    // 总计
     const totalRow = this.logEl.createDiv('tig-log-total');
     totalRow.createSpan({ text: '今日总计' });
     totalRow.createSpan({ text: fmtDuration(totalDay), cls: 'tig-log-total-dur' });
-  }
-
-  _renderTimeline(entries) {
-    if (!entries || entries.length === 0) return;
-    const dm = this.plugin.dataManager;
-    const stColors = this.plugin.settings.situationColors || SITUATION_COLORS;
-    const totalDayMin = entries.reduce((s, e) => s + (e.duration || 0), 0);
-    if (totalDayMin === 0) return;
-
-    const barH = 18, barW = 300;
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${barW} ${barH}`);
-    svg.setAttribute('width', '100%'); svg.setAttribute('height', String(barH));
-    svg.style.marginBottom = '8px'; svg.style.borderRadius = '4px';
-
-    // 计算全天覆盖范围：从 00:00 到 24:00（或末条记录，取更大）
-    const dayStart = new Date(this.logDate + 'T00:00:00');
-    const dayEnd = new Date(this.logDate + 'T23:59:59');
-    const firstEntryTime = entries.length > 0 ? new Date(entries[0].startTime) : dayStart;
-    const lastEntryTime = entries.length > 0 ? new Date(entries[entries.length - 1].endTime) : dayEnd;
-    const spanStart = firstEntryTime < dayStart ? firstEntryTime : dayStart;
-    const spanEnd = lastEntryTime > dayEnd ? lastEntryTime : dayEnd;
-    const totalSpanMin = Math.max(totalDayMin, (spanEnd - spanStart) / 60000);
-    const totalSpan = Math.max(totalDayMin, totalSpanMin);
-
-    let x = 0;
-    // 从 00:00 开始，确保首条前的间隙可见
-    let prevEnd = spanStart;
-    for (const e of entries) {
-      const startTime = new Date(e.startTime);
-      // 间隙（未记录时间段）
-      if (prevEnd && startTime > prevEnd) {
-        const gapStart = new Date(prevEnd); // ⚠️ 必须捕获值！prevEnd 是 let，循环中被覆盖
-        const gapMin = (startTime - gapStart) / 60000;
-        if (gapMin >= 1) {
-          const gapW = Math.max(2, (gapMin / totalSpan) * barW);
-          const gapRect = document.createElementNS(NS, 'rect');
-          gapRect.setAttribute('x', x.toFixed(1)); gapRect.setAttribute('y', '0');
-          gapRect.setAttribute('width', gapW.toFixed(1)); gapRect.setAttribute('height', String(barH));
-          gapRect.setAttribute('fill', 'var(--background-modifier-border)');
-          gapRect.setAttribute('rx', '3'); gapRect.setAttribute('opacity', '0.4');
-          gapRect.style.cursor = 'pointer';
-          gapRect.addEventListener('click', (evt) => {
-            evt.stopPropagation();
-            const gapCtx = {
-              startTime: gapStart.toISOString(),
-              endTime: startTime.toISOString(),
-              gapMin: Math.round(gapMin)
-            };
-            new QuickRecordModal(this.app, this.plugin, () => {
-              this.renderPanel('timer');
-            }, gapCtx).open();
-          });
-          const gapTitle = document.createElementNS(NS, 'title');
-          gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
-          gapRect.appendChild(gapTitle);
-          svg.appendChild(gapRect);
-          x += gapW;
-        }
-      }
-
-      const w = Math.max(2, (e.duration / totalSpan) * barW);
-      const isBlank = e.projectId === '__blank__';
-      const p = isBlank ? null : dm.getProject(e.projectId);
-      const color = isBlank ? 'transparent' : (p?.color || '#9E9E9E');
-
-      const rect = document.createElementNS(NS, 'rect');
-      rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('y', '0');
-      rect.setAttribute('width', w.toFixed(1)); rect.setAttribute('height', String(barH));
-      if (isBlank) {
-        rect.setAttribute('fill', 'none'); 
-        rect.setAttribute('stroke', 'var(--text-faint)'); 
-        rect.setAttribute('stroke-width', '1');
-        rect.setAttribute('stroke-dasharray', '3,3');
-        rect.setAttribute('rx', '4');
-        rect.setAttribute('opacity', '0.5');
-      } else {
-        rect.setAttribute('fill', color);
-        rect.setAttribute('rx', '2');
-      }
-      rect.style.cursor = 'pointer';
-      rect.addEventListener('click', (evt) => {
-        this._editLogEntry(e, evt);
-      });
-      const title = document.createElementNS(NS, 'title');
-      title.textContent = `${isBlank ? '空白' : (p?.name || '?')} ${fmtDuration(e.duration)}`;
-      rect.appendChild(title);
-      svg.appendChild(rect);
-      x += w;
-      prevEnd = new Date(e.endTime);
-    }
-    // 末尾间隙：最后一条记录 → 当天 24:00
-    if (prevEnd && prevEnd < spanEnd) {
-      const gapMin = (spanEnd - prevEnd) / 60000;
-      if (gapMin >= 1) {
-        const gapW = Math.max(2, (gapMin / totalSpan) * barW);
-        const gapRect = document.createElementNS(NS, 'rect');
-        gapRect.setAttribute('x', x.toFixed(1)); gapRect.setAttribute('y', '0');
-        gapRect.setAttribute('width', gapW.toFixed(1)); gapRect.setAttribute('height', String(barH));
-        gapRect.setAttribute('fill', 'var(--background-modifier-border)');
-        gapRect.setAttribute('rx', '3'); gapRect.setAttribute('opacity', '0.4');
-        gapRect.style.cursor = 'pointer';
-        const gapEnd = spanEnd;
-        gapRect.addEventListener('click', (evt) => {
-          evt.stopPropagation();
-          const gapCtx = { startTime: prevEnd.toISOString(), endTime: gapEnd.toISOString(), gapMin: Math.round(gapMin) };
-          new QuickRecordModal(this.app, this.plugin, () => { this.renderPanel('timer'); }, gapCtx).open();
-        });
-        const gapTitle = document.createElementNS(NS, 'title');
-        gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
-        gapRect.appendChild(gapTitle);
-        svg.appendChild(gapRect);
-      }
-    }
-    this.logEl.appendChild(svg);
   }
 
   _editLogEntry(entry, evt) {
@@ -2341,7 +2258,7 @@ class ProjectTreeView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.expandedNodes = new Set();
-    this.viewMode = 'hierarchy'; // 'hierarchy' | 'situation'
+    this.viewMode = this.plugin.settings.treeDefaultView || 'situation';
   }
 
   getViewType() { return VIEW_TYPE_PROJECT_TREE; }
@@ -2991,6 +2908,30 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         .setValue(this.plugin.settings.appendToDailyNote || false)
         .onChange(async (value) => {
           this.plugin.settings.appendToDailyNote = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('时间轴方向')
+      .setDesc('日志列表的排列顺序')
+      .addDropdown(dropdown => dropdown
+        .addOption('oldest-first', '旧→新 (00:00→24:00)')
+        .addOption('newest-first', '新→旧 (24:00→00:00)')
+        .setValue(this.plugin.settings.timelineOrder || 'oldest-first')
+        .onChange(async (value) => {
+          this.plugin.settings.timelineOrder = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('项目树默认视图')
+      .setDesc('打开项目树时的默认分组方式')
+      .addDropdown(dropdown => dropdown
+        .addOption('situation', '按情景')
+        .addOption('hierarchy', '按层级')
+        .setValue(this.plugin.settings.treeDefaultView || 'situation')
+        .onChange(async (value) => {
+          this.plugin.settings.treeDefaultView = value;
           await this.plugin.saveSettings();
         }));
 
