@@ -2109,14 +2109,19 @@ class TimeIsGoldMainView extends ItemView {
     svg.setAttribute('width', '100%'); svg.setAttribute('height', String(barH));
     svg.style.marginBottom = '8px'; svg.style.borderRadius = '4px';
 
-    // 计算全天覆盖范围（包括间隙）
-    const firstTime = entries.length > 0 ? new Date(entries[0].startTime) : new Date();
-    const lastTime = entries.length > 0 ? new Date(entries[entries.length - 1].endTime) : new Date();
-    const totalSpanMin = Math.max(totalDayMin, (lastTime - firstTime) / 60000);
+    // 计算全天覆盖范围：从 00:00 到 24:00（或末条记录，取更大）
+    const dayStart = new Date(this.logDate + 'T00:00:00');
+    const dayEnd = new Date(this.logDate + 'T23:59:59');
+    const firstEntryTime = entries.length > 0 ? new Date(entries[0].startTime) : dayStart;
+    const lastEntryTime = entries.length > 0 ? new Date(entries[entries.length - 1].endTime) : dayEnd;
+    const spanStart = firstEntryTime < dayStart ? firstEntryTime : dayStart;
+    const spanEnd = lastEntryTime > dayEnd ? lastEntryTime : dayEnd;
+    const totalSpanMin = Math.max(totalDayMin, (spanEnd - spanStart) / 60000);
     const totalSpan = Math.max(totalDayMin, totalSpanMin);
 
     let x = 0;
-    let prevEnd = null;
+    // 从 00:00 开始，确保首条前的间隙可见
+    let prevEnd = spanStart;
     for (const e of entries) {
       const startTime = new Date(e.startTime);
       // 间隙（未记录时间段）
@@ -2179,6 +2184,29 @@ class TimeIsGoldMainView extends ItemView {
       svg.appendChild(rect);
       x += w;
       prevEnd = new Date(e.endTime);
+    }
+    // 末尾间隙：最后一条记录 → 当天 24:00
+    if (prevEnd && prevEnd < spanEnd) {
+      const gapMin = (spanEnd - prevEnd) / 60000;
+      if (gapMin >= 1) {
+        const gapW = Math.max(2, (gapMin / totalSpan) * barW);
+        const gapRect = document.createElementNS(NS, 'rect');
+        gapRect.setAttribute('x', x.toFixed(1)); gapRect.setAttribute('y', '0');
+        gapRect.setAttribute('width', gapW.toFixed(1)); gapRect.setAttribute('height', String(barH));
+        gapRect.setAttribute('fill', 'var(--background-modifier-border)');
+        gapRect.setAttribute('rx', '3'); gapRect.setAttribute('opacity', '0.4');
+        gapRect.style.cursor = 'pointer';
+        const gapEnd = spanEnd;
+        gapRect.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          const gapCtx = { startTime: prevEnd.toISOString(), endTime: gapEnd.toISOString(), gapMin: Math.round(gapMin) };
+          new QuickRecordModal(this.app, this.plugin, () => { this.renderPanel('timer'); }, gapCtx).open();
+        });
+        const gapTitle = document.createElementNS(NS, 'title');
+        gapTitle.textContent = `未记录 ${fmtDuration(Math.round(gapMin))} — 点击分配`;
+        gapRect.appendChild(gapTitle);
+        svg.appendChild(gapRect);
+      }
     }
     this.logEl.appendChild(svg);
   }
