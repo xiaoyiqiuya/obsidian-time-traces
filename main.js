@@ -2081,6 +2081,19 @@ class TimeIsGoldMainView extends ItemView {
       if (clampedDur >= 1) segments.push({ type: 'entry', entry: e, start: clampSt, end: clampEt, duration: clampedDur });
       prevEnd = clampEt > prevEnd ? clampEt : prevEnd;
     }
+    // 合并相邻同项目条目
+    const merged = [];
+    for (const seg of segments) {
+      const last = merged[merged.length - 1];
+      if (last && last.type === 'entry' && seg.type === 'entry' && last.entry.projectId === seg.entry.projectId) {
+        last.end = seg.end;
+        last.duration += seg.duration;
+      } else {
+        merged.push(seg);
+      }
+    }
+    segments.length = 0; segments.push(...merged);
+
     if (prevEnd < dayEnd) {
       const gapMin = Math.round((dayEnd - prevEnd) / 60000);
       if (gapMin >= 1) segments.push({ type: 'gap', start: new Date(prevEnd), end: dayEnd, duration: gapMin });
