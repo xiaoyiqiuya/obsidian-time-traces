@@ -1135,17 +1135,16 @@ class SplitRecordModal extends Modal {
       const y = e.clientY;
       dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
       const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-      allRows.forEach(r => { r.classList.remove('tig-tl-drop-target'); r.style.marginTop = ''; });
-      let insertBefore = -1; // -1 = 末尾
+      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
+      let insertBefore = -1;
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
         if (y < rect.top + rect.height / 2) { insertBefore = i; break; }
       }
-      // 在目标位置撑开空间，让其他行自然让位
-      if (insertBefore >= 0 && insertBefore < allRows.length) {
-        allRows[insertBefore].style.marginTop = (allRows[insertBefore].getBoundingClientRect().height + 4) + 'px';
-      } else if (allRows.length > 0) {
-        allRows[allRows.length - 1].style.marginBottom = (allRows[allRows.length - 1].getBoundingClientRect().height + 4) + 'px';
+      // 高亮目标行，不改变布局（避免页面抖动）
+      const highlightIdx = insertBefore >= 0 ? insertBefore : allRows.length - 1;
+      if (highlightIdx >= 0 && highlightIdx < allRows.length) {
+        allRows[highlightIdx].classList.add('tig-tl-drop-target');
       }
     };
 

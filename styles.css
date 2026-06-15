@@ -817,6 +817,7 @@
   border-radius: 6px;
 }
 .tig-tl-drag-source { opacity: 0.3; }
+.tig-tl-drop-target { background: var(--background-modifier-hover) !important; }
 .tig-split-add-row { margin: 8px 0; }
 .tig-split-add-btn {
   padding: 6px 14px; border: 1px dashed var(--background-modifier-border);
@@ -860,7 +861,7 @@
 
 /* ═══ 竖轴时间线 ═══ */
 .tig-timeline { margin: 4px 0 12px 0; }
-.tig-tl-row { display: flex; align-items: flex-start; min-height: 30px; transition: margin 0.15s ease; }
+.tig-tl-row { display: flex; align-items: flex-start; min-height: 30px; }
 .tig-tl-newest-first .tig-tl-row { align-items: flex-end; }
 .tig-tl-time { width: 42px; font-size: 10px; color: var(--text-muted); font-family: var(--font-monospace); text-align: right; padding: 2px 6px 0 0; flex-shrink: 0; line-height: 1.2; }
 .tig-tl-newest-first .tig-tl-time { padding: 0 6px 2px 0; }
