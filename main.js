@@ -991,7 +991,6 @@ class SplitRecordModal extends Modal {
 
   _renderAll() {
     if (!this.itemsEl) return;
-    this.itemsEl.empty();
 
     // 主项目自动吸收剩余时间（除非用户手动调过）
     const mainItem = this.items.find(i => i.isMain);
@@ -1000,10 +999,13 @@ class SplitRecordModal extends Modal {
       mainItem.duration = Math.max(0, this.totalGap - otherSum);
     }
 
+    // 用 fragment 原子替换，避免 height→0 导致页面抖动
+    const frag = document.createDocumentFragment();
     const totalRows = this.items.length;
     for (let idx = 0; idx < this.items.length; idx++) {
-      this._renderRow(this.itemsEl, this.items[idx], idx, totalRows);
+      this._renderRow(frag, this.items[idx], idx, totalRows);
     }
+    this.itemsEl.replaceChildren(frag);
     this._renderSummary();
   }
 
@@ -1163,16 +1165,21 @@ class SplitRecordModal extends Modal {
       const moved = this.items.splice(idx, 1)[0];
       const insertAt = insertBefore >= 0 ? Math.min(insertBefore, this.items.length) : this.items.length;
       this.items.splice(insertAt, 0, moved);
-      // 保存所有项目时长（防止 _renderAll 的 auto-absorb 改动）
-      const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
       dragClone.remove();
       dragClone = null;
       row.removeClass('tig-tl-drag-source');
-      this._renderAll();
-      // 恢复时长
-      for (const saved of savedDurations) {
-        const item = this.items.find(i => i.projectId === saved.id);
-        if (item) item.duration = saved.dur;
+      // DOM 操作：移除拖拽行，插入到目标位置
+      row.style.transition = 'none'; row.style.transform = ''; row.style.opacity = '';
+      const targetRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
+      if (insertAt < targetRows.length) {
+        this.itemsEl.insertBefore(row, targetRows[insertAt]);
+      } else {
+        this.itemsEl.appendChild(row);
+      }
+      // 更新所有行的时间标签
+      const finalRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
+      for (let i = 0; i < finalRows.length; i++) {
+        this._updateRowTime(finalRows[i], i);
       }
       this._renderSummary();
     };
@@ -1190,15 +1197,45 @@ class SplitRecordModal extends Modal {
   _moveItem(idx, dir) {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= this.items.length) return;
-    // 保存时长 → 交换数据 → 重建（时长自动恢复）
-    const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
+
+    const rows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
+    const rowA = rows[idx], rowB = rows[newIdx];
+    if (!rowA || !rowB) return;
+
+    // 交换数据
     [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-    this._renderAll();
-    for (const saved of savedDurations) {
-      const item = this.items.find(i => i.projectId === saved.id);
-      if (item) item.duration = saved.dur;
-    }
-    this._renderSummary();
+
+    // DOM 交换 + CSS 动画
+    const hA = rowA.getBoundingClientRect().height;
+    const hB = rowB.getBoundingClientRect().height;
+    const gap = 4;
+    rowA.style.transition = 'transform 0.2s ease';
+    rowB.style.transition = 'transform 0.2s ease';
+    rowA.style.transform = `translateY(${dir > 0 ? hB + gap : -(hB + gap)}px)`;
+    rowB.style.transform = `translateY(${dir > 0 ? -(hA + gap) : hA + gap}px)`;
+
+    const onEnd = () => {
+      rowA.style.transition = ''; rowA.style.transform = '';
+      rowB.style.transition = ''; rowB.style.transform = '';
+      // 交换 DOM
+      if (dir > 0) rowA.parentNode.insertBefore(rowA, rowB.nextSibling);
+      else rowB.parentNode.insertBefore(rowB, rowA);
+      // 更新两个行的时间标签
+      this._updateRowTime(rowA, newIdx);
+      this._updateRowTime(rowB, idx);
+      // 刷新汇总
+      this._renderSummary();
+      rowA.removeEventListener('transitionend', onEnd);
+    };
+    rowA.addEventListener('transitionend', onEnd, { once: true });
+  }
+
+  _updateRowTime(row, newIdx) {
+    let offsetMin = 0;
+    for (let i = 0; i < newIdx; i++) offsetMin += this.items[i].duration || 0;
+    const st = new Date(new Date(this.gapInfo.lastTime).getTime() + offsetMin * 60000);
+    const tl = row.querySelector('.tig-tl-time');
+    if (tl) tl.setText(fmtTime(st.toISOString()));
   }
 
   _renderSummary() {
