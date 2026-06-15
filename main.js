@@ -2985,6 +2985,7 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.timelineOrder = value;
           await this.plugin.saveSettings();
+          this.plugin.refreshAllViews();
         }));
 
     new Setting(containerEl)
@@ -2997,6 +2998,7 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.treeDefaultView = value;
           await this.plugin.saveSettings();
+          this.plugin.refreshAllViews();
         }));
 
     // ── 数据同步设置 ──
@@ -3095,6 +3097,7 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.situationColors[name] = value;
             await this.plugin.saveSettings();
+            this.plugin.refreshAllViews();
           }));
     }
 
