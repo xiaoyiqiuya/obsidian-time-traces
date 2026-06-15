@@ -2084,7 +2084,7 @@ class TimeIsGoldMainView extends ItemView {
     for (const seg of segments) {
       const row = tl.createDiv('tig-tl-row');
       const timeLabel = row.createDiv('tig-tl-time');
-      timeLabel.setText(fmtTime(seg.start.toISOString()));
+      timeLabel.setText(fmtTime((newestFirst ? seg.end : seg.start).toISOString()));
 
       if (seg.type === 'gap') {
         const card = row.createDiv('tig-tl-card tig-tl-gap');
