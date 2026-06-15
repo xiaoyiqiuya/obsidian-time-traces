@@ -2078,14 +2078,13 @@ class TimeIsGoldMainView extends ItemView {
 
     // 渲染竖轴
     const tl = this.logEl.createDiv('tig-timeline');
+    if (newestFirst) tl.addClass('tig-tl-newest-first');
     let totalDay = 0;
 
     for (const seg of segments) {
       const row = tl.createDiv('tig-tl-row');
       const timeLabel = row.createDiv('tig-tl-time');
       timeLabel.setText(fmtTime(seg.start.toISOString()));
-
-      const bar = row.createDiv('tig-tl-bar');
 
       if (seg.type === 'gap') {
         const card = row.createDiv('tig-tl-card tig-tl-gap');
@@ -2095,7 +2094,6 @@ class TimeIsGoldMainView extends ItemView {
           const gapCtx = { startTime: seg.start.toISOString(), endTime: seg.end.toISOString(), gapMin: seg.duration };
           new QuickRecordModal(this.app, this.plugin, () => { this.renderPanel('timer'); }, gapCtx).open();
         });
-        bar.addClass('tig-tl-bar-gap');
       } else {
         const e = seg.entry;
         totalDay += e.duration || 0;
@@ -2104,23 +2102,15 @@ class TimeIsGoldMainView extends ItemView {
 
         const card = row.createDiv('tig-tl-card');
         card.style.borderLeftColor = sitColor;
-        bar.style.backgroundColor = sitColor;
-
-        const nameEl = card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
-        const durEl = card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
-
+        card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
+        card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
-
-        const delBtn = card.createEl('button', { text: '×', cls: 'tig-tl-del' });
-        delBtn.addEventListener('click', async (ev) => { ev.stopPropagation(); await this._deleteLogEntry(e); });
       }
     }
 
     // 结尾时间标记
     const lastRow = tl.createDiv('tig-tl-row');
-    const endSeg = segments[segments.length - 1];
     lastRow.createDiv('tig-tl-time').setText(newestFirst ? '00:00' : '24:00');
-    lastRow.createDiv('tig-tl-bar').addClass('tig-tl-bar-end');
 
     // 总计
     const totalRow = this.logEl.createDiv('tig-log-total');
