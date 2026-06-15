@@ -3539,8 +3539,8 @@ class TimeIsGoldPlugin extends Plugin {
           if (b.start && b.end) {
             await dm.recordGapEntry(pid, b.start, b.end, b.note || '');
           } else if (b.duration) {
-            const end = new Date(); end.setMinutes(end.getMinutes() - b.duration);
-            await dm.recordGapEntry(pid, end.toISOString(), new Date().toISOString(), b.note || '');
+            const start = new Date(Date.now() - b.duration * 60000);
+            await dm.recordGapEntry(pid, start.toISOString(), new Date().toISOString(), b.note || '');
           } else {
             await dm.recordEntry(pid, b.note || '');
           }
