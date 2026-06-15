@@ -2124,18 +2124,19 @@ class TimeIsGoldMainView extends ItemView {
         });
       } else {
         const e = seg.entry;
-        totalDay += e.duration || 0;
+        const segDur = seg.duration || e.duration || 0;
+        totalDay += segDur;
         const p = e.projectId === '__blank__' ? null : dm.getProject(e.projectId);
         const sitColor = p?.color || '#9E9E9E';
 
         const card = row.createDiv('tig-tl-card');
-        const fillPct = Math.round((e.duration / maxDur) * 100);
+        const fillPct = Math.round((segDur / maxDur) * 100);
         const barFill = card.createDiv('tig-tl-bar-fill');
         barFill.style.height = fillPct + '%';
         barFill.style.backgroundColor = sitColor;
         if (fillPct >= 95) barFill.addClass('tig-tl-bar-full');
         card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
-        card.createSpan({ text: fmtDuration(e.duration), cls: 'tig-tl-dur' });
+        card.createSpan({ text: fmtDuration(segDur), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
       }
     }
