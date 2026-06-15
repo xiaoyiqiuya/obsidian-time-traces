@@ -477,13 +477,9 @@ class DataManager {
       });
     }
 
-    // 排序，取 Top 4
+    // 排序，取 Top 4，返回典型时长（中位数），不缩放
     results.sort((a, b) => b.score - a.score);
     const top = results.slice(0, 4);
-
-    // 生成推荐：按比例分配 gap
-    const totalAvg = top.reduce((s, r) => s + r.medianDuration, 0) || 1;
-    const scale = Math.min(gapMinutes / totalAvg, 2);
 
     return top.map(r => {
       const p = this.getProject(r.projectId);
@@ -491,7 +487,7 @@ class DataManager {
         projectId: r.projectId,
         name: p ? p.name : '(已删除)',
         color: p?.color || '#9E9E9E',
-        duration: Math.min(Math.round(r.medianDuration * scale), gapMinutes),
+        duration: Math.min(r.medianDuration, gapMinutes),
         slotHour: r.lastHour
       };
     });
