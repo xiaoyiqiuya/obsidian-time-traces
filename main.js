@@ -78,6 +78,7 @@ function fmtTime(iso) {
 function fmtDate(iso) {
   try { return new Date(iso).toISOString().split('T')[0]; } catch { return ''; }
 }
+function fmtDateLocal(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
 function today() {
   const d = new Date();
@@ -2056,8 +2057,8 @@ class TimeIsGoldMainView extends ItemView {
     const todayBtn = navBtns.createEl('button', { text: '今天', cls: 'tig-btn tig-btn-sm' });
     const nextBtn = navBtns.createEl('button', { text: '▶', cls: 'tig-btn tig-btn-sm', attr: { title: '后一天' } });
     if (isToday) nextBtn.addClass('tig-btn-disabled');
-    prevBtn.addEventListener('click', () => { const d = new Date(this.logDate); d.setDate(d.getDate() - 1); this.logDate = fmtDate(d.toISOString()); this.renderPanel('timer'); });
-    nextBtn.addEventListener('click', () => { const d = new Date(this.logDate); d.setDate(d.getDate() + 1); if (fmtDate(d.toISOString()) < today()) { this.logDate = fmtDate(d.toISOString()); this.renderPanel('timer'); } });
+    prevBtn.addEventListener('click', () => { const d = new Date(this.logDate + 'T00:00:00'); d.setDate(d.getDate() - 1); this.logDate = fmtDateLocal(d); this.renderPanel('timer'); });
+    nextBtn.addEventListener('click', () => { const d = new Date(this.logDate + 'T00:00:00'); d.setDate(d.getDate() + 1); const nd = fmtDateLocal(d); if (nd <= today()) { this.logDate = nd; this.renderPanel('timer'); } });
     todayBtn.addEventListener('click', () => { this.logDate = today(); this.renderPanel('timer'); });
 
     const addNoteBtn = headerRow.createEl('button', {
@@ -2652,8 +2653,8 @@ class StatisticsView extends ItemView {
     const todayBtn = navRow.createEl('button', { text: '今天', cls: 'tig-stats-nav-today' });
 
     const navigate = (days) => {
-      const d = new Date(this.statsDate); d.setDate(d.getDate() + days);
-      this.statsDate = fmtDate(d.toISOString());
+      const d = new Date(this.statsDate + 'T00:00:00'); d.setDate(d.getDate() + days);
+      this.statsDate = fmtDateLocal(d);
       dateEl.setText(this.statsDate);
       this.renderActiveTab();
     };
