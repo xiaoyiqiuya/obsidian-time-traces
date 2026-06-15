@@ -1132,15 +1132,26 @@ class SplitRecordModal extends Modal {
       const y = e.clientY;
       dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
       const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
+      // 清除上一次的移位
+      allRows.forEach(r => { r.classList.remove('tig-tl-drop-target'); r.style.transform = ''; });
       let insertBefore = -1;
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
         if (y < rect.top + rect.height / 2) { insertBefore = i; break; }
       }
-      // 高亮目标行，不改变布局（避免页面抖动）
+      // transform 移位让出空间（不改布局，无抖动）
+      const dragH = rowRect.height + 4;
+      for (let i = 0; i < allRows.length; i++) {
+        if (i === idx) { allRows[i].style.transform = ''; continue; } // 跳过拖拽源
+        if (insertBefore >= 0 && i >= insertBefore) {
+          allRows[i].style.transform = `translateY(${dragH}px)`;
+        } else if (insertBefore < 0 && i < idx) {
+          allRows[i].style.transform = `translateY(-${dragH}px)`;
+        }
+      }
+      // 高亮目标行
       const highlightIdx = insertBefore >= 0 ? insertBefore : allRows.length - 1;
-      if (highlightIdx >= 0 && highlightIdx < allRows.length) {
+      if (highlightIdx >= 0 && highlightIdx < allRows.length && highlightIdx !== idx) {
         allRows[highlightIdx].classList.add('tig-tl-drop-target');
       }
     };
@@ -1164,6 +1175,8 @@ class SplitRecordModal extends Modal {
       dragClone.remove();
       dragClone = null;
       row.removeClass('tig-tl-drag-source');
+      // 清除所有行的 transform（拖拽时移位效果）
+      allRows.forEach(r => { r.style.transform = ''; });
       // DOM 操作：移除拖拽行，插入到目标位置
       row.style.transition = 'none'; row.style.transform = ''; row.style.opacity = '';
       const targetRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
