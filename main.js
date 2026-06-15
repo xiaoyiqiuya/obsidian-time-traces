@@ -1187,31 +1187,15 @@ class SplitRecordModal extends Modal {
   _moveItem(idx, dir) {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= this.items.length) return;
-    // 仅交换数据和 DOM 位置，不触发 _renderAll（保护时长不变）
-    const rows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-    const rowA = rows[idx], rowB = rows[newIdx];
-    if (rowA && rowB) {
-      // 平滑交换：用 translateY 做视觉动画
-      const hA = rowA.getBoundingClientRect().height;
-      const hB = rowB.getBoundingClientRect().height;
-      rowA.style.transition = 'transform 0.2s ease';
-      rowB.style.transition = 'transform 0.2s ease';
-      rowA.style.transform = `translateY(${dir > 0 ? hB + 4 : -(hA + 4)}px)`;
-      rowB.style.transform = `translateY(${dir > 0 ? -(hA + 4) : hB + 4}px)`;
-      const onEnd = () => {
-        rowA.style.transition = ''; rowA.style.transform = '';
-        rowB.style.transition = ''; rowB.style.transform = '';
-        // 交换 DOM 位置
-        if (dir > 0) rowA.parentNode.insertBefore(rowA, rowB.nextSibling);
-        else rowB.parentNode.insertBefore(rowB, rowA);
-        // 交换数据
-        [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
-        // 只刷新汇总，不重建卡片（保护时长）
-        this._renderSummary();
-        rowA.removeEventListener('transitionend', onEnd);
-      };
-      rowA.addEventListener('transitionend', onEnd, { once: true });
+    // 保存时长 → 交换数据 → 重建（时长自动恢复）
+    const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
+    [this.items[idx], this.items[newIdx]] = [this.items[newIdx], this.items[idx]];
+    this._renderAll();
+    for (const saved of savedDurations) {
+      const item = this.items.find(i => i.projectId === saved.id);
+      if (item) item.duration = saved.dur;
     }
+    this._renderSummary();
   }
 
   _renderSummary() {
@@ -2112,7 +2096,8 @@ class TimeIsGoldMainView extends ItemView {
 
     const newestFirst = this.plugin.settings.timelineOrder === 'newest-first';
     const dayStart = new Date(this.logDate + 'T00:00:00');
-    const dayEnd = new Date(this.logDate + 'T23:59:59');
+    const isToday = this.logDate === today();
+    const dayEnd = isToday ? new Date() : new Date(this.logDate + 'T23:59:59');
 
     // 构建时间线：entries + gaps → segments 数组
     const segments = [];
@@ -2195,7 +2180,8 @@ class TimeIsGoldMainView extends ItemView {
 
     // 结尾时间标记
     const lastRow = tl.createDiv('tig-tl-row');
-    lastRow.createDiv('tig-tl-time').setText(newestFirst ? '00:00' : '24:00');
+    const endLabel = newestFirst ? '00:00' : (isToday ? '现在' : '24:00');
+    lastRow.createDiv('tig-tl-time').setText(endLabel);
 
     // 总计
     const totalRow = this.logEl.createDiv('tig-log-total');
