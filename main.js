@@ -948,19 +948,24 @@ class SplitRecordModal extends Modal {
       cls: 'tig-split-confirm'
     });
     this.confirmBtn.addEventListener('click', async () => {
-      if (this.allocatedMin > this.totalGap) return;
-      const entries = this.items.map(i => ({ projectId: i.projectId, duration: i.duration, note: '' }));
-      if (entries.length === 0) {
-        entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
+      try {
+        if (this.allocatedMin > this.totalGap) { new Notice('⚠️ 已分配时间超过总时长'); return; }
+        const entries = this.items.map(i => ({ projectId: i.projectId, duration: i.duration, note: '' }));
+        if (entries.length === 0) {
+          entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
+        }
+        await dm.recordSplitEntries(entries, this.baseTime);
+        this.close();
+        if (this.onDone) this.onDone();
+        const projectNames = [...new Set(entries.map(e => {
+          const p = dm.getProject(e.projectId);
+          return p ? p.name : '?';
+        }))].join('、');
+        new Notice(`✅ 已分账: ${projectNames}`);
+      } catch (e) {
+        console.error('时迹 分账保存失败:', e);
+        new Notice('❌ 分账保存失败: ' + (e.message || '未知错误'));
       }
-      await dm.recordSplitEntries(entries, this.baseTime);
-      this.close();
-      if (this.onDone) this.onDone();
-      const projectNames = [...new Set(entries.map(e => {
-        const p = dm.getProject(e.projectId);
-        return p ? p.name : '?';
-      }))].join('、');
-      new Notice(`✅ 已分账: ${projectNames}`);
     });
 
   }
