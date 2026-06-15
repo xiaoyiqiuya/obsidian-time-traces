@@ -870,6 +870,7 @@ class SplitRecordModal extends Modal {
     this._addItem(this.mainProjectId, mainProject?.name || '项目', mainProject?.color || '#9E9E9E', this.totalGap, new Date().getHours());
     const mainItem = this.items.find(i => i.projectId === this.mainProjectId);
     if (mainItem) mainItem.isMain = true;
+    this._mainManuallySet = false; // 初始始终 auto-absorb
     this._renderAll();
 
     // ⬜ 空白（遗忘时间）
@@ -1213,20 +1214,19 @@ class SplitRecordModal extends Modal {
     rowA.style.transform = `translateY(${dir > 0 ? hB + gap : -(hB + gap)}px)`;
     rowB.style.transform = `translateY(${dir > 0 ? -(hA + gap) : hA + gap}px)`;
 
+    let ended = false;
     const onEnd = () => {
+      if (ended) return; ended = true;
       rowA.style.transition = ''; rowA.style.transform = '';
       rowB.style.transition = ''; rowB.style.transform = '';
-      // 交换 DOM
       if (dir > 0) rowA.parentNode.insertBefore(rowA, rowB.nextSibling);
       else rowB.parentNode.insertBefore(rowB, rowA);
-      // 更新两个行的时间标签
       this._updateRowTime(rowA, newIdx);
       this._updateRowTime(rowB, idx);
-      // 刷新汇总
       this._renderSummary();
-      rowA.removeEventListener('transitionend', onEnd);
     };
     rowA.addEventListener('transitionend', onEnd, { once: true });
+    setTimeout(onEnd, 250); // fallback
   }
 
   _updateRowTime(row, newIdx) {
