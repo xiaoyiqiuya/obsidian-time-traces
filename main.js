@@ -49,8 +49,10 @@ const DEFAULT_SETTINGS = {
   defaultSituation: "默认",
   showRibbonIcon: true,
   appendToDailyNote: false,
-  dataLocation: "vault",  // "shared" = ~/.time-is-gold/  |  "vault" = Vault内同步
-  dataFolder: "时迹数据"    // vault 模式下数据文件的存放文件夹
+  dataLocation: "vault",
+  dataFolder: "时迹数据",
+  httpEnabled: false,
+  httpToken: ""
 };
 
 function uid() {
@@ -3022,6 +3024,36 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
           }));
     }
 
+    // ── HTTP API ──
+    containerEl.createEl('h3', { text: '🌐 HTTP API' });
+    containerEl.createEl('p', { text: '开启后可通过 HTTP 接口远程记录（需 ZeroTier 局域网），See README', cls: 'setting-item-description' });
+
+    new Setting(containerEl)
+      .setName('启用 HTTP Server')
+      .setDesc('监听 0.0.0.0:18790，Bearer Token 认证')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.httpEnabled || false)
+        .onChange(async (value) => {
+          this.plugin.settings.httpEnabled = value;
+          await this.plugin.saveSettings();
+          if (value && this.plugin.settings.httpToken) {
+            this.plugin._startHttpServer();
+          } else {
+            this.plugin._stopHttpServer();
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('API Token')
+      .setDesc('所有请求需带 Authorization: Bearer <token>')
+      .addText(text => text
+        .setPlaceholder('输入 token...')
+        .setValue(this.plugin.settings.httpToken || '')
+        .onChange(async (value) => {
+          this.plugin.settings.httpToken = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
     // 数据管理
     containerEl.createEl('h3', { text: '💾 数据管理' });
 
@@ -3185,6 +3217,11 @@ class TimeIsGoldPlugin extends Plugin {
     });
 
     console.log('🐾 时迹 插件已加载');
+
+    // ── HTTP API Server ──
+    if (this.settings.httpEnabled && this.settings.httpToken) {
+      this._startHttpServer();
+    }
   }
 
   // 统一记录入口：检测长间隔自动弹分账面板
@@ -3369,7 +3406,130 @@ class TimeIsGoldPlugin extends Plugin {
     return super.saveData({ settings: this.settings });
   }
 
+  // ═══════════════════════════════════════════
+  //  HTTP API Server（ZeroTier 局域网可达）
+  // ═══════════════════════════════════════════
+
+  _startHttpServer() {
+    if (this._httpServer) return;
+    try {
+      const http = require('http');
+      const port = 18790;
+      this._httpServer = http.createServer((req, res) => this._handleApi(req, res));
+      this._httpServer.listen(port, '0.0.0.0', () => {
+        console.log(`🐾 时迹 API: http://0.0.0.0:${port}`);
+      });
+    } catch (e) {
+      console.warn('时迹: HTTP Server 启动失败（移动端不支持）', e.message);
+    }
+  }
+
+  _stopHttpServer() {
+    if (this._httpServer) {
+      this._httpServer.close();
+      this._httpServer = null;
+    }
+  }
+
+  _handleApi(req, res) {
+    const send = (code, body) => {
+      res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(body));
+    };
+
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' });
+      res.end(); return;
+    }
+
+    // 认证
+    const auth = req.headers['authorization'] || '';
+    const token = auth.replace(/^Bearer\s+/i, '');
+    if (token !== this.settings.httpToken) {
+      return send(401, { error: 'unauthorized' });
+    }
+
+    const url = new URL(req.url, 'http://localhost');
+    const path = url.pathname.replace(/\/$/, '');
+    const dm = this.dataManager;
+
+    // 解析 body
+    const readBody = () => new Promise(resolve => {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch { resolve({}); } });
+    });
+
+    // ── 路由 ──
+    const route = async () => {
+      try {
+        if (req.method === 'POST' && path === '/record') {
+          const b = await readBody();
+          const pid = b.project && dm.findProjectByName(b.project)[0]?.id;
+          if (!pid) return send(400, { error: 'project not found: ' + (b.project || '') });
+          if (b.start && b.end) {
+            await dm.recordGapEntry(pid, b.start, b.end, b.note || '');
+          } else if (b.duration) {
+            const end = new Date(); end.setMinutes(end.getMinutes() - b.duration);
+            await dm.recordGapEntry(pid, end.toISOString(), new Date().toISOString(), b.note || '');
+          } else {
+            await dm.recordEntry(pid, b.note || '');
+          }
+          await this.saveData();
+          this.refreshAllViews();
+          return send(200, { ok: true });
+
+        } else if (req.method === 'POST' && path === '/record/blank') {
+          await dm.recordBlankEntry();
+          await this.saveData();
+          this.refreshAllViews();
+          return send(200, { ok: true });
+
+        } else if (req.method === 'POST' && path === '/project') {
+          const b = await readBody();
+          if (!b.name) return send(400, { error: 'name required' });
+          const p = await dm.addProject(b.name, null, null, b.situation || null);
+          return send(200, { project: p });
+
+        } else if (req.method === 'GET' && (path === '/today' || path === '/day')) {
+          const date = url.searchParams.get('date') || today();
+          const entries = dm.getEntriesByDate(date);
+          const projects = dm.getProjects();
+          const totalMin = entries.reduce((s, e) => s + (e.duration || 0), 0);
+          const detail = entries.map(e => {
+            const p = dm.getProject(e.projectId);
+            return { id: e.id, project: p?.name || '?', projectId: e.projectId, duration: e.duration, startTime: e.startTime, endTime: e.endTime, note: e.note };
+          });
+          return send(200, { date, totalMin, entries: detail, projects: projects.map(p => ({ id: p.id, name: p.name, situation: p.situation, color: p.color })) });
+
+        } else if (req.method === 'GET' && path === '/projects') {
+          return send(200, { projects: dm.getProjects().map(p => ({ id: p.id, name: p.name, situation: p.situation, color: p.color, goalHours: p.goalHours })) });
+
+        } else if (req.method === 'GET' && path === '/stats') {
+          const days = parseInt(url.searchParams.get('days') || '7');
+          const daily = [];
+          for (let i = days - 1; i >= 0; i--) {
+            const d = new Date(); d.setDate(d.getDate() - i);
+            const ds = fmtDate(d.toISOString());
+            const es = dm.getEntriesByDate(ds);
+            daily.push({ date: ds, totalMin: es.reduce((s, e) => s + (e.duration || 0), 0), count: es.length });
+          }
+          return send(200, { daily, totalMin: daily.reduce((s, d) => s + d.totalMin, 0), days });
+
+        } else {
+          return send(404, { error: 'not found' });
+        }
+      } catch (e) {
+        console.error('时迹 API 错误:', e);
+        return send(500, { error: e.message });
+      }
+    };
+    route();
+  }
+
   onunload() {
+    this._stopHttpServer();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_MAIN);
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_PROJECT_TREE);
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_STATS);
