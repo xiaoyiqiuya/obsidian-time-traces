@@ -1133,15 +1133,17 @@ class SplitRecordModal extends Modal {
       const y = e.clientY;
       dragClone.style.top = (y - (startY - rowRect.top)) + 'px';
       const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
-      let targetIdx = allRows.length - 1;
+      allRows.forEach(r => { r.classList.remove('tig-tl-drop-target'); r.style.marginTop = ''; });
+      let insertBefore = -1; // -1 = 末尾
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
-        if (y < rect.top + rect.height / 2) { targetIdx = i - 1; break; }
+        if (y < rect.top + rect.height / 2) { insertBefore = i; break; }
       }
-      const showIdx = Math.max(0, Math.min(targetIdx, allRows.length - 1));
-      if (showIdx >= 0 && showIdx < allRows.length) {
-        allRows[showIdx].classList.add('tig-tl-drop-target');
+      // 在目标位置撑开空间，让其他行自然让位
+      if (insertBefore >= 0 && insertBefore < allRows.length) {
+        allRows[insertBefore].style.marginTop = (allRows[insertBefore].getBoundingClientRect().height + 4) + 'px';
+      } else if (allRows.length > 0) {
+        allRows[allRows.length - 1].style.marginBottom = (allRows[allRows.length - 1].getBoundingClientRect().height + 4) + 'px';
       }
     };
 
@@ -1150,16 +1152,16 @@ class SplitRecordModal extends Modal {
       if (!dragging) return;
       dragging = false;
       const allRows = [...this.itemsEl.querySelectorAll('.tig-tl-row')];
-      allRows.forEach(r => r.classList.remove('tig-tl-drop-target'));
+      allRows.forEach(r => { r.classList.remove('tig-tl-drop-target'); r.style.marginTop = ''; r.style.marginBottom = ''; });
       if (!dragClone) return;
       const y = dragClone.getBoundingClientRect().top + dragClone.getBoundingClientRect().height / 2;
-      let targetIdx = allRows.length - 1;
+      let insertBefore = -1;
       for (let i = 0; i < allRows.length; i++) {
         const rect = allRows[i].getBoundingClientRect();
-        if (y < rect.top + rect.height / 2) { targetIdx = i - 1; break; }
+        if (y < rect.top + rect.height / 2) { insertBefore = i; break; }
       }
       const moved = this.items.splice(idx, 1)[0];
-      const insertAt = Math.max(0, Math.min(targetIdx + 1, this.items.length));
+      const insertAt = insertBefore >= 0 ? Math.min(insertBefore, this.items.length) : this.items.length;
       this.items.splice(insertAt, 0, moved);
       // 保存所有项目时长（防止 _renderAll 的 auto-absorb 改动）
       const savedDurations = this.items.map(i => ({ id: i.projectId, dur: i.duration }));
