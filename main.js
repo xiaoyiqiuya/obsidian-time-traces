@@ -3454,6 +3454,13 @@ class TimeIsGoldPlugin extends Plugin {
           entries: parsed.entries || [],
           lastRecordTime: parsed.lastRecordTime || null
         };
+        // 自动修复 lastRecordTime：取最新条目的 endTime
+        if (this.data.entries.length > 0) {
+          const latestEnd = this.data.entries.reduce((max, e) => e.endTime > max ? e.endTime : max, this.data.entries[0].endTime);
+          if (!this.data.lastRecordTime || new Date(latestEnd) > new Date(this.data.lastRecordTime)) {
+            this.data.lastRecordTime = latestEnd;
+          }
+        }
         console.log(`🐾 时迹: 加载数据 (${this.data.projects.length}项目, ${this.data.entries.length}条记录, mode=${mode})`);
         return;
       } catch (e) {
