@@ -359,10 +359,13 @@ class DataManager {
     };
     const entries = this.data.entries || [];
     entries.push(entry);
-    // 保持按 startTime 升序（时间轴依赖此顺序）
     entries.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
     this.data.entries = entries;
-    // 不更新 lastRecordTime —— 填补的是过去的时间段
+    // 更新 lastRecordTime：取当前值和新条目 endTime 中较新的
+    const currLast = this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : null;
+    if (!currLast || endTime > currLast) {
+      this.data.lastRecordTime = endTime.toISOString();
+    }
     await this.plugin.saveData();
     return entry;
   }
@@ -855,10 +858,12 @@ class SplitRecordModal extends Modal {
     // ── 统一项目列表（主项目占满 gap，智能推荐点击添加）──
     this.itemsEl = contentEl.createDiv('tig-split-recs');
 
-    // 主项目：初始占满整个 gap
-    this._addItem(this.mainProjectId, mainProject?.name || '项目', mainProject?.color || '#9E9E9E', this.totalGap, new Date().getHours());
-    const mainItem = this.items.find(i => i.projectId === this.mainProjectId);
-    if (mainItem) mainItem.isMain = true;
+    // 主项目：初始占满整个 gap（如果存在）
+    if (mainProject) {
+      this._addItem(this.mainProjectId, mainProject.name, mainProject.color || '#9E9E9E', this.totalGap, new Date().getHours());
+      const mainItem = this.items.find(i => i.projectId === this.mainProjectId);
+      if (mainItem) mainItem.isMain = true;
+    }
     this._mainManuallySet = false;
     this._renderAll();
 
@@ -941,16 +946,18 @@ class SplitRecordModal extends Modal {
     // 按钮
     const btnRow = contentEl.createDiv('tig-split-btns');
 
-    const skipBtn = btnRow.createEl('button', {
-      text: `仅记「${mainProject?.name || '项目'}」`,
-      cls: 'tig-split-skip'
-    });
-    skipBtn.addEventListener('click', async () => {
-      await dm.recordEntry(this.mainProjectId);
-      this.close();
-      if (this.onDone) this.onDone();
-      new Notice(`🐾 ${mainProject?.name} — ${fmtDuration(this.totalGap)}`);
-    });
+    if (mainProject) {
+      const skipBtn = btnRow.createEl('button', {
+        text: `仅记「${mainProject.name}」`,
+        cls: 'tig-split-skip'
+      });
+      skipBtn.addEventListener('click', async () => {
+        await dm.recordEntry(this.mainProjectId);
+        this.close();
+        if (this.onDone) this.onDone();
+        new Notice(`🐾 ${mainProject.name} — ${fmtDuration(this.totalGap)}`);
+      });
+    }
 
     this.confirmBtn = btnRow.createEl('button', {
       text: '✓ 确认分账',
@@ -961,7 +968,11 @@ class SplitRecordModal extends Modal {
         if (this.allocatedMin > this.totalGap) { new Notice('⚠️ 已分配时间超过总时长'); return; }
         const entries = this.items.map(i => ({ projectId: i.projectId, duration: i.duration, note: '' }));
         if (entries.length === 0) {
-          entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
+          if (this.mainProjectId) {
+            entries.push({ projectId: this.mainProjectId, duration: this.totalGap, note: '' });
+          } else {
+            new Notice('⚠️ 请至少添加一个项目'); return;
+          }
         }
         await dm.recordSplitEntries(entries, this.baseTime);
         this.close();
@@ -2215,10 +2226,9 @@ class TimeIsGoldMainView extends ItemView {
         card.createSpan({ text: `未记录 · ${fmtDuration(seg.duration)}`, cls: 'tig-tl-gap-text' });
         card.createSpan({ text: '点击分配', cls: 'tig-tl-gap-hint' });
         card.addEventListener('click', () => {
-          const mainId = (dm.getRecentProjects(1)[0] || dm.getProjects()[0])?.id;
-          if (!mainId) return;
           const gapInfo = { gapMinutes: seg.duration, isLongGap: seg.duration > 30, lastTime: seg.start.toISOString(), now: seg.end.toISOString() };
-          new SplitRecordModal(this.app, this.plugin, gapInfo, mainId, () => { this.renderPanel('timer'); }, seg.start.toISOString()).open();
+          // 间隙点击：不预设主项目，纯靠智能推荐
+          new SplitRecordModal(this.app, this.plugin, gapInfo, null, () => { this.renderPanel('timer'); }, seg.start.toISOString()).open();
         });
       } else {
         const e = seg.entry;
