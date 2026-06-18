@@ -187,9 +187,9 @@
 ## 开发
 
 ```
-~/.obsidian/plugins/time-is-gold/
+.obsidian/plugins/time-is-gold/
 ├── manifest.json    # 插件元数据
-├── main.js          # 完整逻辑（~1160 行）
+├── main.js          # 完整逻辑
 └── styles.css       # 样式
 ```
 
