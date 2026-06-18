@@ -270,8 +270,8 @@ class DataManager {
   // ── 条目操作 ──
 
   async recordEntry(projectId, note = '') {
-    // 链式记录：基于 lastChainTime 计算，不受独立事件（AI/API）干扰
-    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
+    // 从最新条目（不论 AI 还是手动）的结束时间开始计算
+    const lastTime = this.data.lastRecordTime;
     const endTime = new Date();
     const startTime = lastTime ? new Date(lastTime) : new Date(endTime - 3600000); // 默认1小时前
     
@@ -308,7 +308,6 @@ class DataManager {
     
     this.data.entries = entries;
     this.data.lastRecordTime = endTime.toISOString();
-    this.data.lastChainTime = endTime.toISOString();
     
     await this.plugin.saveData();
     
@@ -322,8 +321,7 @@ class DataManager {
   // ── 空白记录（遗忘时间）──
 
   async recordBlankEntry() {
-    // 空白记录也属于链式操作，使用 lastChainTime
-    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
+    const lastTime = this.data.lastRecordTime;
     const endTime = new Date();
     const startTime = lastTime ? new Date(lastTime) : new Date(endTime - 3600000);
     let duration = Math.round((endTime - startTime) / 60000);
@@ -343,7 +341,6 @@ class DataManager {
     entries.push(entry);
     this.data.entries = entries;
     this.data.lastRecordTime = endTime.toISOString();
-    this.data.lastChainTime = endTime.toISOString();
     await this.plugin.saveData();
     return entry;
   }
@@ -352,7 +349,6 @@ class DataManager {
 
   async recordGapEntry(projectId, startTimeISO, endTimeISO, note = '') {
     // 独立事件记录（API/分账/时间轴填补）
-    // 不更新 lastChainTime，避免污染链式指针
     const startTime = new Date(startTimeISO);
     const endTime = new Date(endTimeISO);
     let duration = Math.round((endTime - startTime) / 60000);
@@ -373,7 +369,6 @@ class DataManager {
     entries.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
     this.data.entries = entries;
     // 更新 lastRecordTime：取当前值和新条目 endTime 中较新的
-    // 注意：不更新 lastChainTime，保证链式记录不被独立事件干扰
     const currLast = this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : null;
     if (!currLast || endTime > currLast) {
       this.data.lastRecordTime = endTime.toISOString();
@@ -385,8 +380,7 @@ class DataManager {
   // ── 长间隔检测 ──
 
   getGapInfo() {
-    // 使用链式指针判断间隔（独立事件不会重置间隔）
-    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
+    const lastTime = this.data.lastRecordTime;
     if (!lastTime) return { gapMinutes: 0, isLongGap: false, lastTime: null, now: new Date().toISOString() };
     const now = new Date();
     const gapMinutes = Math.round((now - new Date(lastTime)) / 60000);
@@ -548,9 +542,7 @@ class DataManager {
 
   async recordSplitEntries(splitEntries, baseTimeISO = null) {
     const entries = this.data.entries || [];
-    // 分账也是链式操作：基于 lastChainTime 或传入的 baseTimeISO
-    const chainBase = this.data.lastChainTime || this.data.lastRecordTime;
-    const base = baseTimeISO ? new Date(baseTimeISO) : (chainBase ? new Date(chainBase) : new Date(Date.now() - 3600000));
+    const base = baseTimeISO ? new Date(baseTimeISO) : (this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : new Date(Date.now() - 3600000));
     let prevEnd = base;
 
     for (const se of splitEntries) {
@@ -571,7 +563,6 @@ class DataManager {
 
     this.data.entries = entries;
     this.data.lastRecordTime = prevEnd.toISOString();
-    this.data.lastChainTime = prevEnd.toISOString();
     await this.plugin.saveData();
     return entries.slice(-splitEntries.length);
   }
@@ -628,22 +619,11 @@ class DataManager {
   }
 
   getLastRecordTime() {
-    // 返回全局最新的条目结束时间（用于 UI 计时器显示）
-    // 遍历所有 entries 取最新 endTime，确保不与链式指针混淆
+    // 返回全局最新的条目结束时间
     const entries = this.data.entries || [];
-    if (entries.length === 0) return this.data.lastChainTime || this.data.lastRecordTime || null;
+    if (entries.length === 0) return this.data.lastRecordTime || null;
     const latest = entries.reduce((max, e) => e.endTime > max ? e.endTime : max, entries[0].endTime);
     return latest;
-  }
-
-  getChainTime() {
-    // 返回链式指针（仅由 UI 手动点击更新）
-    return this.data.lastChainTime || null;
-  }
-
-  getExternalTime() {
-    // 返回最近的独立事件时间（不含链式的指针）
-    return this.data.lastRecordTime || null;
   }
 
   // 按日期分组的条目
@@ -735,10 +715,10 @@ class QuickRecordModal extends Modal {
       });
     } else {
       contentEl.createEl('h3', { text: '🐾 快速记录' });
-      const chainTime = dm.getChainTime() || dm.getLastRecordTime();
-      if (chainTime) {
-        const diff = Math.round((new Date() - new Date(chainTime)) / 60000);
-        contentEl.createEl('p', { text: `距上次记录已过 ${fmtDuration(diff)}`, cls: 'tig-modal-hint' });
+      const lastActivity = dm.getLastRecordTime();
+      if (lastActivity) {
+        const diff = Math.round((new Date() - new Date(lastActivity)) / 60000);
+        contentEl.createEl('p', { text: `⏱ 距最近活动 ${fmtDuration(diff)}`, cls: 'tig-modal-hint' });
       }
     }
 
@@ -3768,8 +3748,7 @@ class TimeIsGoldPlugin extends Plugin {
         this.data = {
           projects: parsed.projects || [],
           entries: parsed.entries || [],
-          lastRecordTime: parsed.lastRecordTime || null,
-          lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
+          lastRecordTime: parsed.lastRecordTime || null
         };
         // 自动修复 lastRecordTime：取最新条目的 endTime
         if (this.data.entries.length > 0) {
@@ -3777,10 +3756,6 @@ class TimeIsGoldPlugin extends Plugin {
           if (!this.data.lastRecordTime || new Date(latestEnd) > new Date(this.data.lastRecordTime)) {
             this.data.lastRecordTime = latestEnd;
           }
-        }
-        // 兼容旧数据：lastChainTime 不存在时初始化为 lastRecordTime
-        if (!this.data.lastChainTime) {
-          this.data.lastChainTime = this.data.lastRecordTime;
         }
         console.log(`🐾 时迹: 加载数据 (${this.data.projects.length}项目, ${this.data.entries.length}条记录, mode=${mode})`);
         return;
@@ -3802,8 +3777,7 @@ class TimeIsGoldPlugin extends Plugin {
           this.data = {
             projects: parsed.projects || [],
             entries: parsed.entries || [],
-            lastRecordTime: parsed.lastRecordTime || null,
-            lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
+            lastRecordTime: parsed.lastRecordTime || null
           };
           await adapter.write(relPath, JSON.stringify(this.data, null, 2));
           console.log('🐾 时迹: 数据已从共享目录迁移到 Vault 内');
@@ -3821,8 +3795,7 @@ class TimeIsGoldPlugin extends Plugin {
           this.data = {
             projects: parsed.projects || [],
             entries: parsed.entries || [],
-            lastRecordTime: parsed.lastRecordTime || null,
-            lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
+            lastRecordTime: parsed.lastRecordTime || null
           };
           await adapter.write(relPath, JSON.stringify(this.data, null, 2));
           console.log('🐾 时迹: 数据已从旧路径迁移到新文件夹');
@@ -4069,11 +4042,9 @@ class TimeIsGoldPlugin extends Plugin {
           // 删除后更新指针：取剩余 entries 中最新的 endTime
           if (dm.data.entries.length === 0) {
             dm.data.lastRecordTime = null;
-            dm.data.lastChainTime = null;
           } else {
             const latestEnd = dm.data.entries.reduce((max, e) => e.endTime > max ? e.endTime : max, dm.data.entries[0].endTime);
             dm.data.lastRecordTime = latestEnd;
-            dm.data.lastChainTime = latestEnd;
           }
           await this.saveData();
           this.refreshAllViews();
