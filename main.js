@@ -1003,17 +1003,10 @@ class SplitRecordModal extends Modal {
 
   // ── 添加项目到数组（不渲染 DOM）──
   _addItem(projectId, name, color, duration, slotHour) {
-    const existing = this.items.find(i => i.projectId === projectId);
-    if (existing) {
-      // 已有项目追加时长：不超过剩余可分配空间
-      const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
-      const remaining = this.totalGap - otherSum;
-      existing.duration += Math.min(duration, Math.max(0, remaining));
-      return;
-    }
-    // 新项目：默认时长不超过剩余空间
-    const otherSum = this.items.reduce((s, i) => (i.isMain ? 0 : s + i.duration), 0);
+    // 始终新增条目，不合并已有项目（支持 A→B→A 排程）
+    const otherSum = this.items.reduce((s, i) => s + i.duration, 0);
     const remaining = this.totalGap - otherSum;
+    if (remaining <= 0) return;
     const capped = Math.min(duration, Math.max(this.defaultStep, remaining));
     if (capped <= 0) return;
     const item = { projectId, name, color, duration: capped, slotHour: slotHour || new Date().getHours() };
@@ -1030,36 +1023,53 @@ class SplitRecordModal extends Modal {
       mainItem.duration = Math.max(0, this.totalGap - otherSum);
     }
 
+    // 对齐用户的时间轴方向设置
+    const newestFirst = this.plugin.settings.timelineOrder === 'newest-first';
+    const displayItems = newestFirst ? [...this.items].reverse() : this.items;
+
     // 用 fragment 原子替换，避免 height→0 导致页面抖动
     const frag = document.createDocumentFragment();
-    const totalRows = this.items.length;
-    for (let idx = 0; idx < this.items.length; idx++) {
-      this._renderRow(frag, this.items[idx], idx, totalRows);
+    const totalRows = displayItems.length;
+    for (let idx = 0; idx < displayItems.length; idx++) {
+      this._renderRow(frag, displayItems[idx], idx, totalRows);
     }
     this.itemsEl.replaceChildren(frag);
     this._renderSummary();
   }
 
   _renderRow(parentEl, item, idx, totalItems) {
-    // 计算该项目在总时长中的位置
+    // 计算该项目在总时长中的位置（基于实际项目的原始顺序）
     let offsetMin = 0;
-    for (let i = 0; i < idx; i++) offsetMin += this.items[i].duration || 0;
+    for (let i = 0; i < this.items.length; i++) {
+      if (this.items[i] === item) break;
+      offsetMin += this.items[i].duration || 0;
+    }
     const startTime = new Date(new Date(this.gapInfo.lastTime).getTime() + offsetMin * 60000);
 
     const row = parentEl.createDiv('tig-tl-row');
     const timeLabel = row.createDiv('tig-tl-time');
-    timeLabel.setText(fmtTime(startTime.toISOString()));
+    const newestFirst = this.plugin.settings.timelineOrder === 'newest-first';
+    // 新到旧模式：时间标签显示事件结束时间（对齐时间轴）
+    if (newestFirst) {
+      const endTime = new Date(startTime.getTime() + item.duration * 60000);
+      timeLabel.setText(fmtTime(endTime.toISOString()));
+    } else {
+      timeLabel.setText(fmtTime(startTime.toISOString()));
+    }
 
     const card = row.createDiv('tig-tl-card');
     if (item.isMain) card.addClass('tig-tl-card-main');
 
-    // 左边框比例填充
-    const maxDur = Math.max(...this.items.map(i => i.duration || 0), 1);
-    const fillPct = Math.round(((item.duration || 0) / maxDur) * 100);
+    // 左边框分段色块（用户选方案 C）
+    const dur = item.duration || 0;
+    const fillPct = dur < 15 ? 25 : dur < 60 ? 50 : dur < 180 ? 75 : 100;
     const barFill = card.createDiv('tig-tl-bar-fill');
     barFill.style.height = fillPct + '%';
     barFill.style.backgroundColor = item.color;
     if (fillPct >= 95) barFill.addClass('tig-tl-bar-full');
+
+    // 分账模式：标记超出总时长
+    if (item._over) card.addClass('tig-split-over');
 
     // ▲▼ 按钮
     if (totalItems > 1) {
@@ -2276,11 +2286,11 @@ class TimeIsGoldMainView extends ItemView {
         const sitColor = p?.color || '#9E9E9E';
 
         const card = row.createDiv('tig-tl-card');
-        const fillPct = Math.round((segDur / maxDur) * 100);
+        const fPct = segDur < 15 ? 25 : segDur < 60 ? 50 : segDur < 180 ? 75 : 100;
         const barFill = card.createDiv('tig-tl-bar-fill');
-        barFill.style.height = fillPct + '%';
+        barFill.style.height = fPct + '%';
         barFill.style.backgroundColor = sitColor;
-        if (fillPct >= 95) barFill.addClass('tig-tl-bar-full');
+        if (fPct >= 95) barFill.addClass('tig-tl-bar-full');
         card.createSpan({ text: p?.name || '(已删除)', cls: 'tig-tl-name' });
         card.createSpan({ text: fmtDuration(segDur), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
