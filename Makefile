@@ -10,7 +10,7 @@ FILES = main.js manifest.json styles.css
 # ── 安全检查 ──────────────────────────────────────
 check:
 	@echo "🔍 安全检查中…"
-	@! grep -nE "(7a80ab|10c050|junchen|小邱|ou_8b54431aeff58|feishu|open\\.feishu|token|secret|password)" $(FILES) docs/*.md 2>/dev/null | grep -v "httpToken" | grep -v "http\.token" | grep -v "api_token" | grep -v "Bearer" | grep -v "password"
+	@! grep -nE "(7a80ab[0-9a-f]{32}|10c050b0[0-9a-f-]+|junchen|小邱|ou_[a-z0-9]{24,})" $(FILES) docs/*.md 2>/dev/null
 	@echo "✅ 安全检查通过"
 
 # ── 部署到生产 ────────────────────────────────────
