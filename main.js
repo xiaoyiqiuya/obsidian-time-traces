@@ -53,8 +53,13 @@ const DEFAULT_SETTINGS = {
   dataFolder: "时迹数据",
   httpEnabled: false,
   httpToken: "",
-  timelineOrder: "oldest-first",
-  treeDefaultView: "situation"
+  timelineOrder: "newest-first",
+  treeDefaultView: "situation",
+  webdavEnabled: false,
+  webdavUrl: "",
+  webdavUsername: "",
+  webdavPassword: "",
+  webdavLastSync: null
 };
 
 function uid() {
@@ -265,7 +270,8 @@ class DataManager {
   // ── 条目操作 ──
 
   async recordEntry(projectId, note = '') {
-    const lastTime = this.data.lastRecordTime;
+    // 链式记录：基于 lastChainTime 计算，不受独立事件（AI/API）干扰
+    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
     const endTime = new Date();
     const startTime = lastTime ? new Date(lastTime) : new Date(endTime - 3600000); // 默认1小时前
     
@@ -302,6 +308,7 @@ class DataManager {
     
     this.data.entries = entries;
     this.data.lastRecordTime = endTime.toISOString();
+    this.data.lastChainTime = endTime.toISOString();
     
     await this.plugin.saveData();
     
@@ -315,7 +322,8 @@ class DataManager {
   // ── 空白记录（遗忘时间）──
 
   async recordBlankEntry() {
-    const lastTime = this.data.lastRecordTime;
+    // 空白记录也属于链式操作，使用 lastChainTime
+    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
     const endTime = new Date();
     const startTime = lastTime ? new Date(lastTime) : new Date(endTime - 3600000);
     let duration = Math.round((endTime - startTime) / 60000);
@@ -335,6 +343,7 @@ class DataManager {
     entries.push(entry);
     this.data.entries = entries;
     this.data.lastRecordTime = endTime.toISOString();
+    this.data.lastChainTime = endTime.toISOString();
     await this.plugin.saveData();
     return entry;
   }
@@ -342,6 +351,8 @@ class DataManager {
   // ── 间隙填补（用于时间轴点击未记录时段）──
 
   async recordGapEntry(projectId, startTimeISO, endTimeISO, note = '') {
+    // 独立事件记录（API/分账/时间轴填补）
+    // 不更新 lastChainTime，避免污染链式指针
     const startTime = new Date(startTimeISO);
     const endTime = new Date(endTimeISO);
     let duration = Math.round((endTime - startTime) / 60000);
@@ -362,6 +373,7 @@ class DataManager {
     entries.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
     this.data.entries = entries;
     // 更新 lastRecordTime：取当前值和新条目 endTime 中较新的
+    // 注意：不更新 lastChainTime，保证链式记录不被独立事件干扰
     const currLast = this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : null;
     if (!currLast || endTime > currLast) {
       this.data.lastRecordTime = endTime.toISOString();
@@ -373,7 +385,8 @@ class DataManager {
   // ── 长间隔检测 ──
 
   getGapInfo() {
-    const lastTime = this.data.lastRecordTime;
+    // 使用链式指针判断间隔（独立事件不会重置间隔）
+    const lastTime = this.data.lastChainTime || this.data.lastRecordTime;
     if (!lastTime) return { gapMinutes: 0, isLongGap: false, lastTime: null, now: new Date().toISOString() };
     const now = new Date();
     const gapMinutes = Math.round((now - new Date(lastTime)) / 60000);
@@ -535,7 +548,9 @@ class DataManager {
 
   async recordSplitEntries(splitEntries, baseTimeISO = null) {
     const entries = this.data.entries || [];
-    const base = baseTimeISO ? new Date(baseTimeISO) : (this.data.lastRecordTime ? new Date(this.data.lastRecordTime) : new Date(Date.now() - 3600000));
+    // 分账也是链式操作：基于 lastChainTime 或传入的 baseTimeISO
+    const chainBase = this.data.lastChainTime || this.data.lastRecordTime;
+    const base = baseTimeISO ? new Date(baseTimeISO) : (chainBase ? new Date(chainBase) : new Date(Date.now() - 3600000));
     let prevEnd = base;
 
     for (const se of splitEntries) {
@@ -555,7 +570,8 @@ class DataManager {
     }
 
     this.data.entries = entries;
-    this.data.lastRecordTime = prevEnd.toISOString(); // 始终用最后一条的结束时间
+    this.data.lastRecordTime = prevEnd.toISOString();
+    this.data.lastChainTime = prevEnd.toISOString();
     await this.plugin.saveData();
     return entries.slice(-splitEntries.length);
   }
@@ -612,6 +628,21 @@ class DataManager {
   }
 
   getLastRecordTime() {
+    // 返回全局最新的条目结束时间（用于 UI 计时器显示）
+    // 遍历所有 entries 取最新 endTime，确保不与链式指针混淆
+    const entries = this.data.entries || [];
+    if (entries.length === 0) return this.data.lastChainTime || this.data.lastRecordTime || null;
+    const latest = entries.reduce((max, e) => e.endTime > max ? e.endTime : max, entries[0].endTime);
+    return latest;
+  }
+
+  getChainTime() {
+    // 返回链式指针（仅由 UI 手动点击更新）
+    return this.data.lastChainTime || null;
+  }
+
+  getExternalTime() {
+    // 返回最近的独立事件时间（不含链式的指针）
     return this.data.lastRecordTime || null;
   }
 
@@ -704,9 +735,9 @@ class QuickRecordModal extends Modal {
       });
     } else {
       contentEl.createEl('h3', { text: '🐾 快速记录' });
-      const lastTime = dm.getLastRecordTime();
-      if (lastTime) {
-        const diff = Math.round((new Date() - new Date(lastTime)) / 60000);
+      const chainTime = dm.getChainTime() || dm.getLastRecordTime();
+      if (chainTime) {
+        const diff = Math.round((new Date() - new Date(chainTime)) / 60000);
         contentEl.createEl('p', { text: `距上次记录已过 ${fmtDuration(diff)}`, cls: 'tig-modal-hint' });
       }
     }
@@ -1416,7 +1447,7 @@ class TimeIsGoldMainView extends ItemView {
 
       this.refreshTimer = setInterval(() => {
         if (this.activeTab === 'timer') this.updateStepTimer();
-      }, 30000);
+      }, 15000);
     } catch (e) {
       container.createEl('pre', { text: '时迹 加载错误:\n' + (e && e.message || String(e)) });
       console.error('时迹 onOpen error:', e);
@@ -1583,7 +1614,8 @@ class TimeIsGoldMainView extends ItemView {
     }
 
     const dot = row.createSpan('tig-dot');
-    dot.style.backgroundColor = node.color || '#9E9E9E';
+    const nodeColor = (node.situation && this.plugin.settings.situationColors[node.situation]) || node.color || '#9E9E9E';
+    dot.style.backgroundColor = nodeColor;
 
     row.createSpan({ text: node.name, cls: 'tig-tree-name' });
     row.createSpan({ text: fmtDuration(node.totalMinutes), cls: 'tig-tree-dur' });
@@ -1795,7 +1827,7 @@ class TimeIsGoldMainView extends ItemView {
     const totalMin = Object.values(pm).reduce((a,b)=>a+b,0);
     const sorted = Object.entries(pm).sort((a,b)=>b[1]-a[1]);
     const projects = dm.getProjects();
-    const colors = sorted.map(([n]) => { const p = projects.find(pr => pr.name === n); return p?.color || '#9E9E9E'; });
+    const colors = sorted.map(([n]) => { const p = projects.find(pr => pr.name === n); return (p?.situation && this.plugin.settings.situationColors[p.situation]) || p?.color || '#9E9E9E'; });
 
     area.createEl('h3', { text: '📆 本月项目分布', cls: 'tig-stats-title' });
     if (totalMin === 0) { area.createEl('p', { text: '本月暂无记录', cls: 'tig-empty' }); return; }
@@ -2216,6 +2248,32 @@ class TimeIsGoldMainView extends ItemView {
     const maxDur = Math.max(...segments.filter(s => s.type === 'entry').map(s => s.duration), 1);
     let totalDay = 0;
 
+    // ── 构建当前时间条（今日专属） ──
+    // 新到旧模式：插在 segments 之前（紧跟最新事件之后，显示在顶部）
+    // 旧到新模式：插在 segments 之后（end label 之前，显示在底部）
+    let nowBarEl = null;
+    if (isToday && segments.length > 0) {
+      const nowTime = new Date();
+      const targetIdx = newestFirst ? 0 : segments.length - 1;
+      const targetSeg = segments[targetIdx];
+      if (targetSeg.type === 'entry' && targetSeg.end && nowTime > targetSeg.end) {
+        const nowDur = Math.round((nowTime - new Date(targetSeg.end)) / 60000);
+        if (nowDur >= 1) {
+          totalDay += nowDur;
+          const nowRow = tl.createDiv('tig-tl-row');
+          nowRow.createDiv('tig-tl-time').setText(fmtTime(targetSeg.end.toISOString()));
+          const nowCard = nowRow.createDiv('tig-tl-card tig-tl-now-bar');
+          const barFill = nowCard.createDiv('tig-tl-bar-fill');
+          barFill.style.height = '100%';
+          barFill.style.backgroundColor = 'var(--text-muted)';
+          barFill.addClass('tig-tl-bar-full');
+          nowCard.addClass('tig-tl-now-active');
+          nowCard.createSpan({ text: `⏳ ${fmtDuration(nowDur)}`, cls: 'tig-tl-now-text' });
+          nowBarEl = nowRow;
+        }
+      }
+    }
+
     for (const seg of segments) {
       const row = tl.createDiv('tig-tl-row');
       const timeLabel = row.createDiv('tig-tl-time');
@@ -2247,6 +2305,11 @@ class TimeIsGoldMainView extends ItemView {
         card.createSpan({ text: fmtDuration(segDur), cls: 'tig-tl-dur' });
         card.addEventListener('click', (evt) => { this._editLogEntry(e, evt); });
       }
+    }
+
+    // 旧到新模式：now bar 移到 segments 之后、end label 之前
+    if (!newestFirst && nowBarEl) {
+      tl.appendChild(nowBarEl);
     }
 
     // 结尾时间标记
@@ -2588,7 +2651,8 @@ class ProjectTreeView extends ItemView {
 
     // 颜色点
     const dot = row.createSpan('tig-dot');
-    dot.style.backgroundColor = node.color || '#9E9E9E';
+    const nodeColor2 = (node.situation && this.plugin.settings.situationColors[node.situation]) || node.color || '#9E9E9E';
+    dot.style.backgroundColor = nodeColor2;
 
     // 名称
     const nameEl = row.createSpan('tig-tree-name');
@@ -2883,7 +2947,7 @@ class StatisticsView extends ItemView {
     const totalMin = Object.values(pm).reduce((a,b)=>a+b,0);
     const sorted = Object.entries(pm).sort((a,b)=>b[1]-a[1]);
     const projects = dm.getProjects();
-    const colors = sorted.map(([n]) => { const p = projects.find(pr => pr.name === n); return p?.color || '#9E9E9E'; });
+    const colors = sorted.map(([n]) => { const p = projects.find(pr => pr.name === n); return (p?.situation && this.plugin.settings.situationColors[p.situation]) || p?.color || '#9E9E9E'; });
     this.contentEl.createEl('h3', { text: '📆 本月项目分布', cls: 'tig-stats-title' });
     if (totalMin === 0) { this.contentEl.createEl('p', { text: '本月暂无记录', cls: 'tig-empty' }); return; }
 
@@ -3010,6 +3074,103 @@ class StatisticsView extends ItemView {
 }
 
 // ═══════════════════════════════════════════
+//  WebDAV 客户端（桌面端专属，Node.js http 模块）
+// ═══════════════════════════════════════════
+
+class WebDAVClient {
+  constructor(settings) {
+    this.url = settings.webdavUrl || '';
+    this.username = settings.webdavUsername || '';
+    this.password = settings.webdavPassword || '';
+  }
+
+  _authHeaders() {
+    const headers = {};
+    if (this.username || this.password) {
+      const encoded = Buffer.from(`${this.username}:${this.password}`).toString('base64');
+      headers['Authorization'] = `Basic ${encoded}`;
+    }
+    return headers;
+  }
+
+  _request(method, body = null) {
+    return new Promise((resolve, reject) => {
+      try {
+        const http = require('http');
+        const https = require('https');
+        const parsed = new URL(this.url);
+        const mod = parsed.protocol === 'https:' ? https : http;
+        const headers = { ...this._authHeaders() };
+        if (body) {
+          headers['Content-Type'] = 'application/json';
+          headers['Content-Length'] = Buffer.byteLength(body).toString();
+        }
+
+        const req = mod.request({
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          method,
+          headers,
+          timeout: 10000
+        }, (res) => {
+          let data = '';
+          res.on('data', (chunk) => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve({ status: res.statusCode, data, headers: res.headers });
+            } else {
+              resolve({ status: res.statusCode, data, headers: res.headers, error: `HTTP ${res.statusCode}` });
+            }
+          });
+        });
+
+        req.on('error', (e) => reject(e));
+        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+
+        if (body) req.write(body);
+        req.end();
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  /** GET 远程数据，返回解析后的 JSON 或 null */
+  async getRemoteData() {
+    try {
+      const result = await this._request('GET');
+      if (result.error || !result.data) return null;
+      const parsed = JSON.parse(result.data);
+      if (!parsed || typeof parsed !== 'object') return null;
+      // 读取远程文件的时间戳
+      const lastModified = result.headers['last-modified'];
+      const remoteTime = lastModified ? new Date(lastModified).getTime() : Date.now();
+      return { ...parsed, _remoteTime: remoteTime };
+    } catch (e) {
+      console.warn('时迹 WebDAV GET 失败:', e.message);
+      return null;
+    }
+  }
+
+  /** PUT 本地数据到远程，返回是否成功 */
+  async putData(data) {
+    try {
+      const body = JSON.stringify({
+        projects: data.projects || [],
+        entries: data.entries || [],
+        lastRecordTime: data.lastRecordTime || null
+      }, null, 2);
+      const result = await this._request('PUT', body);
+      return !result.error;
+    } catch (e) {
+      console.warn('时迹 WebDAV PUT 失败:', e.message);
+      return false;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════
 //  设置页
 // ═══════════════════════════════════════════
 
@@ -3053,9 +3214,9 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
       .setName('时间轴方向')
       .setDesc('日志列表的排列顺序')
       .addDropdown(dropdown => dropdown
-        .addOption('oldest-first', '旧→新 (00:00→24:00)')
         .addOption('newest-first', '新→旧 (24:00→00:00)')
-        .setValue(this.plugin.settings.timelineOrder || 'oldest-first')
+        .addOption('oldest-first', '旧→新 (00:00→24:00)')
+        .setValue(this.plugin.settings.timelineOrder || 'newest-first')
         .onChange(async (value) => {
           this.plugin.settings.timelineOrder = value;
           await this.plugin.saveSettings();
@@ -3097,6 +3258,80 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         }));
 
     this._buildFolderSetting(containerEl);
+  }
+
+  _buildSituationEditor() {
+    const containerEl = this.containerEl;
+    const colors = this.plugin.settings.situationColors || {};
+    const sitContainer = containerEl.createDiv('tig-sit-editor');
+
+    for (const [name, color] of Object.entries(colors)) {
+      const row = sitContainer.createDiv('tig-sit-row');
+      row.createSpan({ text: name, cls: 'tig-sit-name' });
+      const picker = row.createEl('input', { type: 'color', cls: 'tig-sit-picker' });
+      picker.value = color;
+      picker.addEventListener('input', async () => {
+        this.plugin.settings.situationColors[name] = picker.value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+      });
+      const delBtn = row.createEl('button', { text: '✕', cls: 'tig-sit-del' });
+      delBtn.addEventListener('click', async () => {
+        if (Object.keys(this.plugin.settings.situationColors).length <= 1) {
+          new Notice('⚠️ 至少保留一个情境');
+          return;
+        }
+        delete this.plugin.settings.situationColors[name];
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+        new Notice(`🗑️ 已删除情境「${name}」`);
+        containerEl.removeChild(sitContainer);
+        this._buildSituationEditor();
+      });
+    }
+
+    const addRow = sitContainer.createDiv('tig-sit-row tig-sit-add-row');
+    const newNameInput = addRow.createEl('input', { type: 'text', placeholder: '新情境名', cls: 'tig-input tig-sit-new-name' });
+    const newPicker = addRow.createEl('input', { type: 'color', cls: 'tig-sit-picker' });
+    newPicker.value = '#9E9E9E';
+    const addBtn = addRow.createEl('button', { text: '+ 添加', cls: 'tig-btn tig-btn-sm' });
+    const doAdd = async () => {
+      const n = newNameInput.value.trim();
+      if (!n) { new Notice('⚠️ 请输入情境名称'); return; }
+      if (this.plugin.settings.situationColors[n]) { new Notice(`⚠️ 情境「${n}」已存在`); return; }
+      this.plugin.settings.situationColors[n] = newPicker.value;
+      await this.plugin.saveSettings();
+      new Notice(`✅ 已添加情境「${n}」`);
+      newNameInput.value = '';
+      containerEl.removeChild(sitContainer);
+      this._buildSituationEditor();
+    };
+    addBtn.addEventListener('click', doAdd);
+    newNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+
+    const resetRow = sitContainer.createDiv('tig-sit-reset-row');
+    const resetBtn = resetRow.createEl('button', { text: '🔄 重置为默认情景', cls: 'tig-btn tig-btn-sm' });
+    resetBtn.style.color = 'var(--text-error)';
+    resetBtn.addEventListener('click', async () => {
+      const modal = new (require('obsidian').Modal)(this.app);
+      modal.titleEl.setText('⚠️ 重置情景颜色');
+      modal.contentEl.createEl('p', { text: '将删除所有当前情景，已有项目颜色变为灰色（重建同名情景自动恢复）。确定重置？' });
+      const btnRow = modal.contentEl.createDiv({ cls: 'modal-button-container' });
+      const confirmed = await new Promise(resolve => {
+        btnRow.createEl('button', { text: '取消' }).addEventListener('click', () => { modal.close(); resolve(false); });
+        const confirmBtn = btnRow.createEl('button', { text: '确认重置', cls: 'mod-cta' });
+        confirmBtn.style.backgroundColor = 'var(--text-error)';
+        confirmBtn.addEventListener('click', () => { modal.close(); resolve(true); });
+        modal.open();
+      });
+      if (!confirmed) return;
+      this.plugin.settings.situationColors = { ...SITUATION_COLORS };
+      await this.plugin.saveSettings();
+      this.plugin.refreshAllViews();
+      new Notice('🔄 已重置为默认情景');
+      containerEl.removeChild(sitContainer);
+      this._buildSituationEditor();
+    });
   }
 
   async _buildFolderSetting(containerEl) {
@@ -3157,23 +3392,10 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
           if (input) doSave(input.value);
         }));
 
-    // 情境颜色设置
+    // ── 情境颜色编辑器（新增/编辑/删除/重置） ──
     containerEl.createEl('h3', { text: '🎨 情境颜色' });
-    containerEl.createEl('p', { text: '自定义各情境的显示颜色', cls: 'setting-item-description' });
-
-    const colors = this.plugin.settings.situationColors || SITUATION_COLORS;
-
-    for (const [name, color] of Object.entries(colors)) {
-      new Setting(containerEl)
-        .setName(name)
-        .addColorPicker(picker => picker
-          .setValue(color)
-          .onChange(async (value) => {
-            this.plugin.settings.situationColors[name] = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshAllViews();
-          }));
-    }
+    containerEl.createEl('p', { text: '新增、编辑、删除情境。删除或重置后，已有项目的颜色变为灰色，重建同名情境自动恢复颜色。', cls: 'setting-item-description' });
+    this._buildSituationEditor();
 
     // ── HTTP API ──
     containerEl.createEl('h3', { text: '🌐 HTTP API' });
@@ -3203,6 +3425,90 @@ class TimeIsGoldSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.httpToken = value.trim();
           await this.plugin.saveSettings();
+        }));
+
+    // ── WebDAV 局域网同步 ──
+    containerEl.createEl('h3', { text: '🔄 WebDAV 局域网同步' });
+    containerEl.createEl('p', { text: '同步 time-traces.json 到 WebDAV 服务器（如 chezdav），实现局域网跨设备同步。桌面端专属。', cls: 'setting-item-description' });
+
+    new Setting(containerEl)
+      .setName('启用 WebDAV 同步')
+      .setDesc('保存时自动推送，启动时自动拉取')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.webdavEnabled || false)
+        .onChange(async (value) => {
+          this.plugin.settings.webdavEnabled = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('WebDAV URL')
+      .setDesc('数据文件的完整 URL，如 http://192.168.1.100:8080/时迹数据/time-traces.json')
+      .addText(text => text
+        .setPlaceholder('http://192.168.1.100:8080/时迹/time-traces.json')
+        .setValue(this.plugin.settings.webdavUrl || '')
+        .onChange(async (value) => {
+          this.plugin.settings.webdavUrl = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('用户名')
+      .setDesc('WebDAV 认证用户名（可选，chezdav 通常不需要）')
+      .addText(text => text
+        .setPlaceholder('留空则无认证')
+        .setValue(this.plugin.settings.webdavUsername || '')
+        .onChange(async (value) => {
+          this.plugin.settings.webdavUsername = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('密码')
+      .setDesc('WebDAV 认证密码（可选）')
+      .addText(text => {
+        text.setPlaceholder('留空则无认证')
+          .setValue(this.plugin.settings.webdavPassword || '');
+        text.inputEl.type = 'password';
+        text.onChange(async (value) => {
+          this.plugin.settings.webdavPassword = value;
+          await this.plugin.saveSettings();
+        });
+        return text;
+      });
+
+    const syncStatusEl = containerEl.createEl('p', { text: this.plugin.settings.webdavLastSync
+      ? `上次同步: ${new Date(this.plugin.settings.webdavLastSync).toLocaleString('zh-CN')}`
+      : '尚未同步', cls: 'setting-item-description' });
+
+    new Setting(containerEl)
+      .setName('手动同步')
+      .setDesc('立即执行一次双向同步（先拉后推）')
+      .addButton(btn => btn
+        .setButtonText('🔄 立即同步')
+        .onClick(async () => {
+          if (isMobile(this.plugin)) {
+            new Notice('⚠️ WebDAV 同步仅在桌面端可用');
+            return;
+          }
+          if (!this.plugin.settings.webdavUrl) {
+            new Notice('⚠️ 请先设置 WebDAV URL');
+            return;
+          }
+          btn.setButtonText('同步中...');
+          btn.setDisabled(true);
+          try {
+            const client = new WebDAVClient(this.plugin.settings);
+            const result = await this.plugin._syncWithWebDAV(client);
+            syncStatusEl.textContent = `上次同步: ${new Date().toLocaleString('zh-CN')} — ${result}`;
+            new Notice(result);
+          } catch (e) {
+            syncStatusEl.textContent = `同步失败: ${e.message}`;
+            new Notice('❌ 同步失败: ' + e.message);
+          } finally {
+            btn.setButtonText('🔄 立即同步');
+            btn.setDisabled(false);
+          }
         }));
 
     // 数据管理
@@ -3288,6 +3594,16 @@ class TimeIsGoldPlugin extends Plugin {
 
     // ── 第二步：根据 dataLocation 从正确位置加载项目+记录 ──
     await this.loadSharedData();
+
+    // ── WebDAV 拉取（启动时同步）──
+    if (this.settings.webdavEnabled && this.settings.webdavUrl && !isMobile(this)) {
+      const client = new WebDAVClient(this.settings);
+      this._syncWithWebDAV(client).then(result => {
+        console.log('🐾 时迹 WebDAV 启动同步:', result);
+      }).catch(e => {
+        console.warn('时迹 WebDAV 启动同步失败:', e.message);
+      });
+    }
 
     // 数据管理器
     this.dataManager = new DataManager(this);
@@ -3452,7 +3768,8 @@ class TimeIsGoldPlugin extends Plugin {
         this.data = {
           projects: parsed.projects || [],
           entries: parsed.entries || [],
-          lastRecordTime: parsed.lastRecordTime || null
+          lastRecordTime: parsed.lastRecordTime || null,
+          lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
         };
         // 自动修复 lastRecordTime：取最新条目的 endTime
         if (this.data.entries.length > 0) {
@@ -3460,6 +3777,10 @@ class TimeIsGoldPlugin extends Plugin {
           if (!this.data.lastRecordTime || new Date(latestEnd) > new Date(this.data.lastRecordTime)) {
             this.data.lastRecordTime = latestEnd;
           }
+        }
+        // 兼容旧数据：lastChainTime 不存在时初始化为 lastRecordTime
+        if (!this.data.lastChainTime) {
+          this.data.lastChainTime = this.data.lastRecordTime;
         }
         console.log(`🐾 时迹: 加载数据 (${this.data.projects.length}项目, ${this.data.entries.length}条记录, mode=${mode})`);
         return;
@@ -3481,7 +3802,8 @@ class TimeIsGoldPlugin extends Plugin {
           this.data = {
             projects: parsed.projects || [],
             entries: parsed.entries || [],
-            lastRecordTime: parsed.lastRecordTime || null
+            lastRecordTime: parsed.lastRecordTime || null,
+            lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
           };
           await adapter.write(relPath, JSON.stringify(this.data, null, 2));
           console.log('🐾 时迹: 数据已从共享目录迁移到 Vault 内');
@@ -3499,7 +3821,8 @@ class TimeIsGoldPlugin extends Plugin {
           this.data = {
             projects: parsed.projects || [],
             entries: parsed.entries || [],
-            lastRecordTime: parsed.lastRecordTime || null
+            lastRecordTime: parsed.lastRecordTime || null,
+            lastChainTime: parsed.lastChainTime || parsed.lastRecordTime || null
           };
           await adapter.write(relPath, JSON.stringify(this.data, null, 2));
           console.log('🐾 时迹: 数据已从旧路径迁移到新文件夹');
@@ -3557,11 +3880,98 @@ class TimeIsGoldPlugin extends Plugin {
     } catch (e) {
       console.error('时迹: 保存数据失败', e.message);
     }
+
+    // ── WebDAV 推送（保存后异步同步，不阻塞）──
+    if (this.settings.webdavEnabled && this.settings.webdavUrl && !isMobile(this)) {
+      const client = new WebDAVClient(this.settings);
+      client.putData(this.data).then(ok => {
+        if (ok) console.log('🐾 时迹 WebDAV 推送成功');
+      }).catch(() => { /* 静默失败 */ });
+    }
   }
 
   // 保存设置到 Vault 本地（永不丢失 dataLocation）
   async saveSettings() {
     return super.saveData({ settings: this.settings });
+  }
+
+  // ═══════════════════════════════════════════
+  //  WebDAV 双向同步
+  // ═══════════════════════════════════════════
+
+  /** 合并远程数据到本地，返回合并后的 data */
+  _mergeData(remote) {
+    const local = this.data;
+    const remoteProjects = remote.projects || [];
+    const remoteEntries = remote.entries || [];
+    const remoteLastRecord = remote.lastRecordTime || null;
+
+    // 合并 projects（按 id 去重，远程新增的加入本地）
+    const localProjectIds = new Set((local.projects || []).map(p => p.id));
+    for (const rp of remoteProjects) {
+      if (!localProjectIds.has(rp.id)) {
+        local.projects.push(rp);
+        localProjectIds.add(rp.id);
+      }
+    }
+
+    // 合并 entries（按 id 去重 ∪）
+    const localEntryIds = new Set((local.entries || []).map(e => e.id));
+    const newEntries = [];
+    for (const re of remoteEntries) {
+      if (!localEntryIds.has(re.id)) {
+        newEntries.push(re);
+        localEntryIds.add(re.id);
+      }
+    }
+
+    if (newEntries.length > 0) {
+      local.entries = [...(local.entries || []), ...newEntries];
+      // 按 startTime 排序
+      local.entries.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    }
+
+    // lastRecordTime 取最新
+    if (remoteLastRecord && (!local.lastRecordTime || new Date(remoteLastRecord) > new Date(local.lastRecordTime))) {
+      local.lastRecordTime = remoteLastRecord;
+    }
+
+    return local;
+  }
+
+  /** 执行双向同步：先拉后推。返回结果描述字符串 */
+  async _syncWithWebDAV(client) {
+    if (isMobile(this)) return '⚠️ 移动端不支持 WebDAV';
+
+    // 1. 拉取远程数据
+    const remote = await client.getRemoteData();
+    if (!remote) return '⚠️ 服务器不可达';
+
+    // 2. 比对：远程有本地没有的数据 → 合并
+    const remoteEntries = remote.entries || [];
+    const localEntryIds = new Set((this.data.entries || []).map(e => e.id));
+    const newCount = remoteEntries.filter(e => !localEntryIds.has(e.id)).length;
+
+    if (newCount > 0) {
+      this._mergeData(remote);
+      await this.saveData();
+      this.refreshAllViews();
+    }
+
+    // 3. 推送到远程
+    const ok = await client.putData(this.data);
+
+    // 4. 记录同步时间
+    this.settings.webdavLastSync = new Date().toISOString();
+    await this.saveSettings();
+
+    if (ok) {
+      const msg = newCount > 0
+        ? `✅ 同步完成（拉取 ${newCount} 条，推送成功）`
+        : '✅ 同步完成';
+      return msg;
+    }
+    return newCount > 0 ? `⚠️ 已拉取 ${newCount} 条，但推送失败` : '⚠️ 推送失败';
   }
 
   // ═══════════════════════════════════════════
@@ -3656,11 +4066,14 @@ class TimeIsGoldPlugin extends Plugin {
           const entry = (dm.data.entries || []).find(e => e.id === id);
           if (!entry) return send(404, { error: 'record not found: ' + id });
           dm.data.entries = (dm.data.entries || []).filter(e => e.id !== id);
-          // 如果删除的是最后一条，更新 lastRecordTime
+          // 删除后更新指针：取剩余 entries 中最新的 endTime
           if (dm.data.entries.length === 0) {
             dm.data.lastRecordTime = null;
+            dm.data.lastChainTime = null;
           } else {
-            dm.data.lastRecordTime = dm.data.entries[dm.data.entries.length - 1].endTime;
+            const latestEnd = dm.data.entries.reduce((max, e) => e.endTime > max ? e.endTime : max, dm.data.entries[0].endTime);
+            dm.data.lastRecordTime = latestEnd;
+            dm.data.lastChainTime = latestEnd;
           }
           await this.saveData();
           this.refreshAllViews();
@@ -3761,28 +4174,26 @@ class TimeIsGoldPlugin extends Plugin {
   }
 
   refreshAllViews() {
-    // 刷新主视图（tabbed：重新渲染当前面板）
-    const mainLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_MAIN);
-    for (const leaf of mainLeaves) {
-      if (leaf.view && leaf.view instanceof TimeIsGoldMainView) {
-        leaf.view.renderPanel(leaf.view.activeTab || 'timer');
-      }
+    // 只刷新实际可见的视图，避免重建隐藏视图的 DOM
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_MAIN);
+    for (const leaf of leaves) {
+      if (!leaf.view || !(leaf.view instanceof TimeIsGoldMainView)) continue;
+      if (leaf.getRoot()?.containerEl?.isShown?.() === false) continue; // 跳过隐藏标签页
+      leaf.view.renderPanel(leaf.view.activeTab || 'timer');
     }
 
-    // 刷新独立的项目树视图
     const treeLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_PROJECT_TREE);
     for (const leaf of treeLeaves) {
-      if (leaf.view && leaf.view instanceof ProjectTreeView) {
-        leaf.view.refreshTree();
-      }
+      if (!leaf.view || !(leaf.view instanceof ProjectTreeView)) continue;
+      if (leaf.getRoot()?.containerEl?.isShown?.() === false) continue;
+      leaf.view.refreshTree();
     }
 
-    // 刷新独立的统计视图
     const statsLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_STATS);
     for (const leaf of statsLeaves) {
-      if (leaf.view && leaf.view instanceof StatisticsView) {
-        leaf.view.renderActiveTab();
-      }
+      if (!leaf.view || !(leaf.view instanceof StatisticsView)) continue;
+      if (leaf.getRoot()?.containerEl?.isShown?.() === false) continue;
+      leaf.view.renderActiveTab();
     }
   }
 }
