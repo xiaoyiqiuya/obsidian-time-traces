@@ -186,11 +186,25 @@
 
 ## 开发
 
+### 文件结构
+
 ```
 .obsidian/plugins/time-is-gold/
 ├── manifest.json    # 插件元数据
 ├── main.js          # 完整逻辑
 └── styles.css       # 样式
+```
+
+### 工作流
+
+```bash
+# Step 1: 改代码 → 本地测试
+make test
+# → 安全检查 → 复制到 vault → Obsidian 重载测试
+
+# Step 2: 测试通过 → 发版
+make push
+# → 安全检查 → 输入版本号 → git commit/tag/push → 本地同步
 ```
 
 - 作者：砂糖
