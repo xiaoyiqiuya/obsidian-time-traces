@@ -4085,6 +4085,72 @@ class TimeIsGoldPlugin extends Plugin {
           }
           return send(200, { daily, totalMin: daily.reduce((s, d) => s + d.totalMin, 0), days });
 
+        } else if (req.method === 'POST' && path === '/api/inbox') {
+          // 写入伊涅芙 inbox（手机 → 伊涅芙 通信通道）
+          const ib = await readBody();
+          const msg = ib.message || '';
+          if (!msg) return send(400, { error: 'message required' });
+          try {
+            const fs = require('fs');
+            const path = require('path');
+            const os = require('os');
+            const inboxPath = path.join(os.homedir(), '.openclaw', 'workspace', 'shared', 'ineffa-inbox.md');
+            const archiveDir = path.join(os.homedir(), '.openclaw', 'workspace', 'shared', 'ineffa-archive');
+            if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+            if (fs.existsSync(inboxPath)) {
+              const oldContent = fs.readFileSync(inboxPath, 'utf8');
+              const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+              fs.writeFileSync(path.join(archiveDir, `${ts}.md`), oldContent);
+            }
+            const newMsg = `---
+id: apk-${Date.now()}
+timestamp: ${new Date().toISOString()}
+status: new
+priority: normal
+from: 时迹APK
+to: 伊涅芙
+---
+
+## 📱 来自手机的讯息
+
+${msg}
+`;
+            fs.writeFileSync(inboxPath, newMsg);
+            return send(200, { ok: true });
+          } catch (e) {
+            return send(500, { error: 'inbox: ' + e.message });
+          }
+        } else if (req.method === 'POST' && path === '/api/proxy') {
+          // 代理到 OpenClaw Gateway（127.0.0.1:18789）
+          // APK → 插件API → OpenClaw，绕开 localhost-only 限制
+          const b = await readBody();
+          const target = b.target || '/';     // OpenClaw 目标路径
+          const method = b.method || 'GET';    // 请求方法
+          const payload = b.body || null;      // 请求体
+          try {
+            const http = require('http');
+            const options = {
+              hostname: '127.0.0.1',
+              port: 18789,
+              path: target,
+              method: method,
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 15000
+            };
+            const resp = await new Promise((resolve, reject) => {
+              const proxyReq = http.request(options, (proxyRes) => {
+                let data = '';
+                proxyRes.on('data', chunk => data += chunk);
+                proxyRes.on('end', () => resolve({ status: proxyRes.statusCode, body: data }));
+              });
+              proxyReq.on('error', reject);
+              if (payload) proxyReq.write(JSON.stringify(payload));
+              proxyReq.end();
+            });
+            return send(resp.status, JSON.parse(resp.body || '{}'));
+          } catch (e) {
+            return send(502, { error: 'proxy: ' + e.message });
+          }
         } else {
           return send(404, { error: 'not found' });
         }
